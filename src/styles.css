@@ -119,11 +119,27 @@ button.ghost.danger { color: var(--danger); }
 /* main layout */
 .main {
   flex: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1px;
+  display: flex;
   background: var(--border);
   overflow: hidden;
+}
+.pane-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.splitter {
+  flex: 0 0 4px;
+  background: var(--border);
+  cursor: col-resize;
+  position: relative;
+  z-index: 1;
+}
+.splitter:hover {
+  background: var(--accent, #4a90e2);
 }
 
 .pane {
@@ -132,6 +148,9 @@ button.ghost.danger { color: var(--danger); }
   background: var(--bg);
   min-width: 0;
   min-height: 0;
+  /* Fill the pane-wrap so headers stay anchored and pane-body scrolls. */
+  flex: 1 1 0;
+  height: 100%;
 }
 .pane-header {
   padding: 10px 14px;
@@ -167,6 +186,9 @@ button.ghost.danger { color: var(--danger); }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+.segment-cols.single {
+  grid-template-columns: 1fr;
 }
 .col {
   display: flex;
@@ -352,3 +374,4 @@ button.ghost.danger { color: var(--danger); }
 .history-row:hover { background: var(--panel-2); }
 .history-title { font-weight: 500; margin-bottom: 2px; }
 .history-meta { color: var(--muted); font-size: 12px; }
+.history-rename { flex: 1; margin: 8px 12px; }

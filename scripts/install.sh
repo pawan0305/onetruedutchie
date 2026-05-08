@@ -23,6 +23,12 @@ if [[ ! -d node_modules ]] || ! command -v cargo >/dev/null 2>&1; then
   [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
 fi
 
+# Make sure a stable code signing identity exists. Without one, ad-hoc signing
+# changes the cdhash on every rebuild and macOS re-prompts for Screen Recording
+# / Microphone permission every single time.
+step "Checking code signing identity..."
+bash scripts/setup-cert.sh
+
 step "Building Swift audio sidecar..."
 npm run build:swift
 
@@ -35,8 +41,8 @@ bash scripts/inject-infoplist.sh
 APP_SRC="src-tauri/target/release/bundle/macos/OneTrueDutchie.app"
 [[ -d "$APP_SRC" ]] || die "build did not produce $APP_SRC"
 
-step "Ad-hoc codesigning (required for ScreenCaptureKit / TCC)..."
-codesign --force --deep --sign - "$APP_SRC"
+step "Codesigning with stable identity (so TCC permissions persist)..."
+codesign --force --deep --sign "OneTrueDutchie Local Dev" "$APP_SRC"
 ok "signed"
 
 APP_DEST="/Applications/OneTrueDutchie.app"
@@ -45,10 +51,10 @@ rm -rf "$APP_DEST"
 cp -R "$APP_SRC" "$APP_DEST"
 ok "installed"
 
-# Clear any stale TCC entry pointing at the old bundle path so macOS
-# re-prompts cleanly the first time. Safe to ignore failures.
-tccutil reset ScreenCapture com.onetruedutchie.app >/dev/null 2>&1 || true
-tccutil reset Microphone    com.onetruedutchie.app >/dev/null 2>&1 || true
+# NOTE: We deliberately do NOT call `tccutil reset` here. Because the binary
+# is signed with the same code signing identity every rebuild, macOS keeps
+# the permission grant — the user only has to grant Screen Recording and
+# Microphone once.
 
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

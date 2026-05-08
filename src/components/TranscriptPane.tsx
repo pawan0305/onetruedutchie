@@ -1,9 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { api } from "../lib/tauri";
 import type { Segment } from "../lib/types";
 
 interface Props {
   segments: Segment[];
   pendingId?: string;
+  meetingId?: string;
+  showEnglish?: boolean;
 }
 
 function fmtTime(iso: string): string {
@@ -14,9 +17,34 @@ function fmtTime(iso: string): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function TranscriptPane({ segments, pendingId }: Props) {
+export function TranscriptPane({ segments, pendingId, meetingId, showEnglish = true }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const [copyState, setCopyState] = useState<"idle" | "translating" | "copied" | "error">("idle");
+
+  const onCopy = async () => {
+    if (segments.filter((s) => s.is_final).length === 0) return;
+    setCopyState("translating");
+    try {
+      const text = await api.exportEnglishTranscript(meetingId);
+      if (!text.trim()) {
+        setCopyState("idle");
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      setCopyState("copied");
+      setTimeout(() => setCopyState("idle"), 1500);
+    } catch {
+      setCopyState("error");
+      setTimeout(() => setCopyState("idle"), 2000);
+    }
+  };
+
+  const copyLabel =
+    copyState === "translating" ? "translating…"
+    : copyState === "copied" ? "✓ copied"
+    : copyState === "error" ? "× failed"
+    : "Copy EN";
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -37,7 +65,17 @@ export function TranscriptPane({ segments, pendingId }: Props) {
     <section className="pane transcript-pane">
       <header className="pane-header">
         <h2>Transcript</h2>
-        <span className="pane-sub">{segments.length} segments</span>
+        <div className="pane-sub-row">
+          <button
+            className="ghost"
+            onClick={onCopy}
+            disabled={segments.length === 0 || copyState === "translating"}
+            title="Translate the full transcript and copy to clipboard"
+          >
+            {copyLabel}
+          </button>
+          <span className="pane-sub">{segments.length} segments</span>
+        </div>
       </header>
       <div className="pane-body scroll" ref={scrollRef} onScroll={onScroll}>
         {segments.length === 0 && (
@@ -53,17 +91,19 @@ export function TranscriptPane({ segments, pendingId }: Props) {
             }`}
           >
             <div className="segment-time">{fmtTime(s.started_at)}</div>
-            <div className="segment-cols">
+            <div className={`segment-cols${showEnglish ? "" : " single"}`}>
               <div className="col nl">
-                <div className="lang-label">NL</div>
+                {showEnglish && <div className="lang-label">NL</div>}
                 <div className="text">{s.dutch || <em>…</em>}</div>
               </div>
-              <div className="col en">
-                <div className="lang-label">EN</div>
-                <div className="text">
-                  {s.english ?? (s.is_final ? <em className="muted">translating…</em> : <em className="muted">—</em>)}
+              {showEnglish && (
+                <div className="col en">
+                  <div className="lang-label">EN</div>
+                  <div className="text">
+                    {s.english ?? (s.is_final ? <em className="muted">translating…</em> : <em className="muted">—</em>)}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         ))}

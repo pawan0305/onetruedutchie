@@ -27,6 +27,7 @@ export interface Meeting {
 export interface SettingsView {
   deepgram_set: boolean;
   anthropic_set: boolean;
+  translate: boolean;
 }
 
 export interface MeetingSummaryRow {

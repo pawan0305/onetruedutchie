@@ -62,13 +62,100 @@ let outputFormat: AVAudioFormat = AVAudioFormat(
 //
 // Future work: proper sample-aligned mixing using AVAudioEngine.
 
+/// Mixes mic + system audio sample-aligned at the output rate (16 kHz mono
+/// Int16) and writes a single coherent stream to stdout.
+///
+/// Both sources push converted samples here; a 100 ms tick reads up to 1600
+/// samples from each ring buffer, zero-pads if either is short, sums them
+/// sample-by-sample (clamped to Int16), and writes the result to stdout.
+///
+/// This is what fixes "everything appears twice in the transcript": the old
+/// implementation just appended whatever bytes arrived first, so a phrase
+/// captured by both mic and the system loopback was concatenated rather than
+/// summed — Deepgram heard it twice.
 final class Sink {
     static let shared = Sink()
     private let lock = NSLock()
-    func emit(int16: UnsafePointer<Int16>, frames: Int) {
-        let bytes = frames * MemoryLayout<Int16>.size
-        let data = Data(bytes: int16, count: bytes)
-        stdoutWriter.write(data)
+    private var micBuf: [Int16] = []
+    private var sysBuf: [Int16] = []
+    /// Cap each buffer at ~500 ms so we don't grow unbounded if the consumer
+    /// (this sink's tick) ever falls behind a producer.
+    private let maxBuffered = 8000
+    private var timer: DispatchSourceTimer?
+    private var bytesSinceLog: Int = 0
+    private var lastLog: Date = Date()
+
+    func start() {
+        let t = DispatchSource.makeTimerSource(
+            queue: DispatchQueue(label: "sink.mixer", qos: .userInteractive))
+        t.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        t.setEventHandler { [weak self] in self?.tick() }
+        t.resume()
+        self.timer = t
+    }
+
+    func append(int16: UnsafePointer<Int16>, frames: Int, source: String) {
+        guard frames > 0 else { return }
+        let buf = Array(UnsafeBufferPointer(start: int16, count: frames))
+        lock.lock()
+        if source == "mic" {
+            micBuf.append(contentsOf: buf)
+            if micBuf.count > maxBuffered {
+                micBuf.removeFirst(micBuf.count - maxBuffered)
+            }
+        } else {
+            sysBuf.append(contentsOf: buf)
+            if sysBuf.count > maxBuffered {
+                sysBuf.removeFirst(sysBuf.count - maxBuffered)
+            }
+        }
+        lock.unlock()
+    }
+
+    private func tick() {
+        let frames = 1600 // 100 ms at 16 kHz
+        var mic = [Int16](repeating: 0, count: frames)
+        var sys = [Int16](repeating: 0, count: frames)
+        var micCount = 0
+        var sysCount = 0
+        lock.lock()
+        if !micBuf.isEmpty {
+            micCount = min(micBuf.count, frames)
+            for i in 0..<micCount { mic[i] = micBuf[i] }
+            micBuf.removeFirst(micCount)
+        }
+        if !sysBuf.isEmpty {
+            sysCount = min(sysBuf.count, frames)
+            for i in 0..<sysCount { sys[i] = sysBuf[i] }
+            sysBuf.removeFirst(sysCount)
+        }
+        let micDepth = micBuf.count
+        let sysDepth = sysBuf.count
+        bytesSinceLog += frames * 2
+        let now = Date()
+        let dt = now.timeIntervalSince(lastLog)
+        let shouldLog = dt >= 5.0
+        let bytesForLog = bytesSinceLog
+        if shouldLog {
+            bytesSinceLog = 0
+            lastLog = now
+        }
+        lock.unlock()
+
+        // Mix: sum mic + sys sample-by-sample, clamp to Int16 range.
+        var out = [Int16](repeating: 0, count: frames)
+        for i in 0..<frames {
+            let s = Int32(mic[i]) + Int32(sys[i])
+            out[i] = Int16(clamping: s)
+        }
+        out.withUnsafeBufferPointer { ptr in
+            let data = Data(buffer: ptr)
+            stdoutWriter.write(data)
+        }
+
+        if shouldLog {
+            logLine("mix: \(bytesForLog) bytes/5s (mic=\(micCount), sys=\(sysCount), backlog mic=\(micDepth) sys=\(sysDepth))")
+        }
     }
 }
 
@@ -77,15 +164,18 @@ func makeConverter(from: AVAudioFormat, to: AVAudioFormat) -> AVAudioConverter? 
     AVAudioConverter(from: from, to: to)
 }
 
-func convertAndEmit(_ input: AVAudioPCMBuffer, converter: AVAudioConverter) {
+func convertAndEmit(_ input: AVAudioPCMBuffer, converter: AVAudioConverter, source: String) {
     let ratio = outputFormat.sampleRate / input.format.sampleRate
     let cap = AVAudioFrameCount(Double(input.frameLength) * ratio + 1024)
     guard let out = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: cap) else { return }
     var fed = false
     var error: NSError?
+    // CRITICAL: never signal `.endOfStream` for a streaming converter — once
+    // it sees that, every subsequent convert() call produces 0 frames. Use
+    // `.noDataNow` to mean "no more input this round; flush what you can".
     let status = converter.convert(to: out, error: &error) { _, statusPtr in
         if fed {
-            statusPtr.pointee = .endOfStream
+            statusPtr.pointee = .noDataNow
             return nil
         }
         fed = true
@@ -96,33 +186,75 @@ func convertAndEmit(_ input: AVAudioPCMBuffer, converter: AVAudioConverter) {
         if let error = error { errLine("convert error: \(error)") }
         return
     }
-    if let p = out.int16ChannelData?[0] {
-        Sink.shared.emit(int16: p, frames: Int(out.frameLength))
+    // .inputRanDry is normal here and means "I produced what I could; come
+    // back next call with more input". Any frames in `out` are valid output.
+    if out.frameLength > 0, let p = out.int16ChannelData?[0] {
+        Sink.shared.append(int16: p, frames: Int(out.frameLength), source: source)
     }
 }
 
-extension CMSampleBuffer {
-    /// Wrap the audio buffer list into an AVAudioPCMBuffer (no copy).
-    func asPCMBuffer() -> AVAudioPCMBuffer? {
-        guard let fmtDesc = CMSampleBufferGetFormatDescription(self),
-              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(fmtDesc) else {
-            return nil
-        }
-        var asbd = asbdPtr.pointee
-        guard let avFormat = AVAudioFormat(streamDescription: &asbd) else { return nil }
-        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(self))
-        guard frames > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: avFormat, frameCapacity: frames) else {
-            return nil
-        }
-        buffer.frameLength = frames
-        var abl = buffer.mutableAudioBufferList.pointee
-        let s = CMSampleBufferCopyPCMDataIntoAudioBufferList(
-            self, at: 0, frameCount: Int32(frames), into: &abl
-        )
-        guard s == noErr else { return nil }
-        return buffer
+/// Wrap a CMSampleBuffer's audio data as an AVAudioPCMBuffer without copying.
+/// The returned PCMBuffer is only valid as long as the provided closure runs;
+/// the closure is invoked with the buffer (or nil if extraction failed).
+///
+/// We do this rather than `CMSampleBufferCopyPCMDataIntoAudioBufferList`,
+/// which kept failing with kCMSampleBufferError_RequiredParameterMissing
+/// (-12731) because AVAudioPCMBuffer's mutableAudioBufferList is statically
+/// sized for one mBuffer slot and SC delivers more.
+func withPCMBuffer<R>(of sb: CMSampleBuffer, body: (AVAudioPCMBuffer?) -> R) -> R {
+    guard let fmtDesc = CMSampleBufferGetFormatDescription(sb),
+          let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(fmtDesc) else {
+        return body(nil)
     }
+    var asbd = asbdPtr.pointee
+    guard let avFormat = AVAudioFormat(streamDescription: &asbd) else {
+        return body(nil)
+    }
+
+    // Discover the AudioBufferList size needed (variable for stereo non-interleaved).
+    var sizeNeeded = 0
+    var status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        sb,
+        bufferListSizeNeededOut: &sizeNeeded,
+        bufferListOut: nil,
+        bufferListSize: 0,
+        blockBufferAllocator: nil,
+        blockBufferMemoryAllocator: nil,
+        flags: 0,
+        blockBufferOut: nil
+    )
+    guard status == noErr, sizeNeeded > 0 else {
+        errLine("CMSampleBuffer ABL sizeNeededOut failed: \(status)")
+        return body(nil)
+    }
+
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: sizeNeeded, alignment: 16)
+    defer { raw.deallocate() }
+    let ablPtr = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
+
+    var blockBuffer: CMBlockBuffer?
+    status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        sb,
+        bufferListSizeNeededOut: nil,
+        bufferListOut: ablPtr,
+        bufferListSize: sizeNeeded,
+        blockBufferAllocator: nil,
+        blockBufferMemoryAllocator: nil,
+        flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+        blockBufferOut: &blockBuffer
+    )
+    guard status == noErr, blockBuffer != nil else {
+        errLine("CMSampleBuffer ABL fetch failed: \(status)")
+        return body(nil)
+    }
+
+    // No-copy wrap. blockBuffer is retained until this scope ends — keep it
+    // alive by referencing it inside the closure call below.
+    let pcm = AVAudioPCMBuffer(pcmFormat: avFormat, bufferListNoCopy: ablPtr, deallocator: nil)
+    let result = body(pcm)
+    // Force blockBuffer to live until after `body` returns.
+    _ = blockBuffer
+    return result
 }
 
 // ---------- system audio (ScreenCaptureKit) ----------
@@ -131,6 +263,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     private var converter: AVAudioConverter?
     private let q = DispatchQueue(label: "sc.audio")
     private let videoQ = DispatchQueue(label: "sc.video.noop")
+    private var sampleCount: Int = 0
+    private var lastLog: Date = Date()
 
     func start() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -140,19 +274,31 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             throw NSError(domain: "AudioCapture", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "no displays found"])
         }
-        let myPid = ProcessInfo.processInfo.processIdentifier
-        let excludeApps = content.applications.filter { $0.processID == myPid }
+        // Empty exclusions → capture audio from every app on this display.
+        // Self-audio is excluded via `excludesCurrentProcessAudio` on the
+        // config below, which is the correct API for that. Putting our own
+        // pid in `excludingApplications` here was preventing audio frames
+        // from being delivered at all on macOS 14+.
         let filter = SCContentFilter(
             display: display,
-            excludingApplications: excludeApps,
+            excludingApplications: [],
             exceptingWindows: []
         )
         let cfg = SCStreamConfiguration()
         cfg.capturesAudio = true
+        cfg.excludesCurrentProcessAudio = true
         cfg.sampleRate = 48_000
-        cfg.channelCount = 2
-        cfg.width = 2
-        cfg.height = 2
+        // MONO. Stereo non-interleaved breaks the CMSampleBuffer →
+        // AVAudioPCMBuffer copy because AVAudioPCMBuffer's mutableAudioBufferList
+        // is statically sized for 1 mBuffer slot and the copy fails with
+        // kCMSampleBufferError_RequiredParameterMissing (-12731). Voice audio
+        // is mono anyway — no quality loss for transcription.
+        cfg.channelCount = 1
+        // 2x2 was a hack to minimise video work, but several macOS versions
+        // refuse to deliver audio frames if the video config is degenerate.
+        // 100x100 is small enough to be cheap and big enough to be valid.
+        cfg.width = 100
+        cfg.height = 100
         cfg.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         cfg.queueDepth = 6
         cfg.showsCursor = false
@@ -175,10 +321,23 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer,
                 of type: SCStreamOutputType) {
         guard type == .audio, sb.isValid else { return }
-        guard let pcm = sb.asPCMBuffer() else { return }
-        if converter == nil { converter = makeConverter(from: pcm.format, to: outputFormat) }
-        guard let conv = converter else { return }
-        convertAndEmit(pcm, converter: conv)
+        sampleCount += 1
+        let now = Date()
+        if now.timeIntervalSince(lastLog) > 5.0 {
+            lastLog = now
+            logLine("sys audio: received \(sampleCount) sample buffers")
+        }
+        // No-copy wrap. The conversion to 16 kHz Int16 mono inside
+        // convertAndEmit copies the data out, so it's safe for the wrapper
+        // to deallocate after this call returns.
+        withPCMBuffer(of: sb) { pcm in
+            guard let pcm = pcm else { return }
+            if converter == nil {
+                converter = makeConverter(from: pcm.format, to: outputFormat)
+            }
+            guard let conv = converter else { return }
+            convertAndEmit(pcm, converter: conv, source: "sys")
+        }
     }
 
     // SCStreamDelegate
@@ -196,6 +355,8 @@ final class NoopVideoSink: NSObject, SCStreamOutput {
 final class MicCapture {
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
+    private var tapCallCount: Int = 0
+    private var lastTapLog: Date = Date()
 
     func start() throws {
         let input = engine.inputNode
@@ -204,11 +365,19 @@ final class MicCapture {
             throw NSError(domain: "Mic", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "no input device"])
         }
-        // Tap with reasonable buffer size.
+        logLine("mic: installing tap with format \(inFormat)")
         input.installTap(onBus: 0, bufferSize: 1024, format: inFormat) { [weak self] buffer, _ in
-            guard let self = self else { return }
+            guard let self = self else {
+                errLine("mic tap: self deallocated")
+                return
+            }
+            self.tapCallCount += 1
+            let now = Date()
+            if now.timeIntervalSince(self.lastTapLog) > 5.0 {
+                self.lastTapLog = now
+                logLine("mic tap fired count=\(self.tapCallCount) frames=\(buffer.frameLength)")
+            }
             if self.converter == nil {
-                // If mic is multi-channel, mix to mono via converter.
                 let monoIn = AVAudioFormat(
                     commonFormat: inFormat.commonFormat,
                     sampleRate: inFormat.sampleRate,
@@ -219,10 +388,21 @@ final class MicCapture {
                     ?? AVAudioConverter(from: inFormat, to: outputFormat)
             }
             guard let conv = self.converter else { return }
-            convertAndEmit(buffer, converter: conv)
+            convertAndEmit(buffer, converter: conv, source: "mic")
         }
+        engine.prepare()
         try engine.start()
-        logLine("mic: capture started (sr=\(inFormat.sampleRate), ch=\(inFormat.channelCount))")
+        logLine("mic: capture started (sr=\(inFormat.sampleRate), ch=\(inFormat.channelCount), running=\(engine.isRunning))")
+
+        // Periodically log engine status to detect silent failure.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self = self else { return }
+            logLine("mic: 3s check — engine.isRunning=\(self.engine.isRunning), tapCalls=\(self.tapCallCount)")
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self = self else { return }
+            logLine("mic: 10s check — engine.isRunning=\(self.engine.isRunning), tapCalls=\(self.tapCallCount)")
+        }
     }
 
     func stop() {
@@ -288,13 +468,18 @@ final class Supervisor {
     static var shared: Supervisor?
 }
 
+// Start the mixer pump — drives stdout output at a steady 16 kHz pace
+// regardless of how either source produces data.
+Sink.shared.start()
+
 let sup = Supervisor(micEnabled: captureMic)
 Supervisor.shared = sup
 
-// Run the async supervisor, blocking the main thread until exit.
-let sema = DispatchSemaphore(value: 0)
+// Kick off captures on a background task; main thread runs the dispatch loop.
+// AVAudioEngine + ScreenCaptureKit deliver buffers via libdispatch; if the
+// main thread blocks on a semaphore the dispatch sources never fire and the
+// audio tap stops calling back after the first buffer.
 Task.detached {
     await sup.run()
-    sema.signal()
 }
-sema.wait()
+dispatchMain()

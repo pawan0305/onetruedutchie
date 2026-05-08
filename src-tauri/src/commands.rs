@@ -40,6 +40,15 @@ pub async fn set_api_keys(
     settings::settings_view().map_err(|e| e.to_string())
 }
 
+/// Toggle per-chunk translation on/off. Persists to keys.json so it survives
+/// restarts. Reads on every Final segment in handle_dg_event so the toggle
+/// takes effect mid-meeting without restarting capture.
+#[tauri::command]
+pub async fn set_translate_enabled(enabled: bool) -> Result<SettingsView, String> {
+    settings::set_translate_enabled(enabled).map_err(|e| e.to_string())?;
+    settings::settings_view().map_err(|e| e.to_string())
+}
+
 // ------- meetings -------
 
 #[tauri::command]
@@ -151,6 +160,86 @@ pub async fn delete_meeting(
         .map_err(|e| e.to_string())
 }
 
+/// Translate the full transcript of either the running meeting (id=None) or
+/// a historical meeting in one shot — for the "Copy EN" button. Producing
+/// one cohesive translation reads much better than concatenating the live
+/// per-chunk translations.
+#[tauri::command]
+pub async fn export_english_transcript(
+    id: Option<Uuid>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
+    let claude = AnthropicClient::new(an_key);
+
+    let transcript = if let Some(meeting_id) = id {
+        // Prefer the live meeting if the id matches; otherwise load from disk.
+        if let Some(handle) = state.current() {
+            if handle.meeting.read().id == meeting_id {
+                handle.meeting.read().source_text()
+            } else {
+                let dir = state.meetings_dir();
+                let m = tokio::task::spawn_blocking(move || storage::load_meeting(&dir, meeting_id))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?;
+                m.source_text()
+            }
+        } else {
+            let dir = state.meetings_dir();
+            let m = tokio::task::spawn_blocking(move || storage::load_meeting(&dir, meeting_id))
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+            m.source_text()
+        }
+    } else {
+        let Some(handle) = state.current() else {
+            return Err("no meeting".into());
+        };
+        let s = handle.meeting.read().source_text();
+        s
+    };
+
+    if transcript.trim().is_empty() {
+        return Ok(String::new());
+    }
+    claude
+        .translate_full(&transcript)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Rename a historical meeting on disk. The active meeting (if any) is
+/// renamed via `set_meeting_title` instead — that path also updates in-memory
+/// state and emits an event.
+#[tauri::command]
+pub async fn rename_meeting(
+    id: Uuid,
+    title: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    // If the renamed meeting is the one currently in progress, route through
+    // the live path so listeners get the update event.
+    if let Some(handle) = state.current() {
+        if handle.meeting.read().id == id {
+            handle.meeting.write().title = title.clone();
+            let snap = handle.meeting.read().clone();
+            state.emit("meeting:update", snap);
+            return Ok(());
+        }
+    }
+    let dir = state.meetings_dir();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut m = storage::load_meeting(&dir, id)?;
+        m.title = title;
+        storage::save_meeting(&dir, &m)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn regenerate_summary(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let Some(handle) = state.current() else {
@@ -158,7 +247,10 @@ pub async fn regenerate_summary(state: State<'_, Arc<AppState>>) -> Result<(), S
     };
     let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
     let claude = AnthropicClient::new(an_key);
-    let transcript = handle.meeting.read().finalized_text(true);
+    // Feed the source-language transcript so Claude sees the full picture
+    // and translates+summarizes coherently rather than re-using the choppy
+    // per-chunk translations.
+    let transcript = handle.meeting.read().source_text();
     if transcript.is_empty() {
         return Ok(());
     }
@@ -226,11 +318,13 @@ pub async fn ask_question(
     let app_state = state.inner().clone();
     let claude = AnthropicClient::new(an_key);
 
-    // Snapshot transcript & history for the request.
+    // Snapshot transcript & history for the request. Source-language only —
+    // Claude reads Dutch fine, and feeding the choppy per-chunk translations
+    // produces worse answers than the original.
     let (transcript, history): (String, Vec<(String, String)>) = {
         let m = meeting_arc.read();
         (
-            m.finalized_text(true),
+            m.source_text(),
             m.chat
                 .iter()
                 .map(|c| (c.role.clone(), c.content.clone()))
@@ -318,7 +412,9 @@ async fn run_meeting(
     let cancel = handle.cancel.clone();
     let meeting = handle.meeting.clone();
 
-    // 1. Audio sidecar.
+    // 1. Audio sidecar. Capture mic + system audio. The Swift sidecar mixes
+    //    them sample-aligned so when both pick up the same speech (e.g. mic
+    //    sidetone bleeding into system loopback) we get one phrase, not two.
     let audio_rx = audio::start_capture(&state.app_handle, cancel.clone(), true).await?;
 
     // 2. Deepgram session.
@@ -338,9 +434,9 @@ async fn run_meeting(
 
     let claude = Arc::new(AnthropicClient::new(an_key));
 
-    let mut pending: Option<Segment> = None;
-    let mut summary_timer = tokio::time::interval(Duration::from_secs(120));
-    summary_timer.tick().await; // skip immediate fire
+    let mut pending: Option<PendingSeg> = None;
+    // Summaries are user-triggered only (regenerate_summary command). No
+    // periodic auto-refresh — that just burned tokens and surprised users.
     let mut save_timer = tokio::time::interval(Duration::from_secs(15));
     save_timer.tick().await;
 
@@ -350,30 +446,6 @@ async fn run_meeting(
             evt = dg_rx.recv() => {
                 let Some(evt) = evt else { break };
                 handle_dg_event(evt, &mut pending, &state, &meeting, &claude).await;
-            }
-            _ = summary_timer.tick() => {
-                let transcript = meeting.read().finalized_text(true);
-                if transcript.is_empty() { continue; }
-                let claude2 = claude.clone();
-                let state2 = state.clone();
-                let meeting2 = meeting.clone();
-                tokio::spawn(async move {
-                    match claude2.summarize(&transcript).await {
-                        Ok(s) => {
-                            let now = Utc::now();
-                            {
-                                let mut m = meeting2.write();
-                                m.summary = Some(s.clone());
-                                m.summary_updated_at = Some(now);
-                            }
-                            state2.emit(
-                                "summary:update",
-                                json!({ "summary": s, "updated_at": now }),
-                            );
-                        }
-                        Err(err) => tracing::warn!(?err, "summary refresh failed"),
-                    }
-                });
             }
             _ = save_timer.tick() => {
                 let snap = meeting.read().clone();
@@ -400,69 +472,106 @@ async fn run_meeting(
     Ok(())
 }
 
+/// Holds the running interim for the current chunk. Each `is_final=true`
+/// from Deepgram closes a chunk and commits it as its own segment, so we
+/// don't accumulate stable text here — interim only.
+struct PendingSeg {
+    id: Uuid,
+    started_at: chrono::DateTime<Utc>,
+    interim: String,
+}
+
+impl PendingSeg {
+    fn new() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            started_at: Utc::now(),
+            interim: String::new(),
+        }
+    }
+
+    fn to_segment(&self, dutch: String, is_final: bool) -> Segment {
+        Segment {
+            id: self.id,
+            started_at: self.started_at,
+            dutch,
+            english: None,
+            speaker: None,
+            is_final,
+        }
+    }
+}
+
+/// Treat anything starting with `en` (en, en-US, en-GB, …) as English.
+fn is_english(lang: &Option<String>) -> bool {
+    lang.as_deref()
+        .map(|l| l.to_ascii_lowercase().starts_with("en"))
+        .unwrap_or(false)
+}
+
 async fn handle_dg_event(
     evt: DeepgramEvent,
-    pending: &mut Option<Segment>,
+    pending: &mut Option<PendingSeg>,
     state: &Arc<AppState>,
     meeting: &Arc<RwLock<Meeting>>,
     claude: &Arc<AnthropicClient>,
 ) {
     match evt {
         DeepgramEvent::Interim { text, .. } => {
-            let seg = pending.get_or_insert_with(|| Segment {
-                id: Uuid::new_v4(),
-                started_at: Utc::now(),
-                dutch: String::new(),
-                english: None,
-                speaker: None,
-                is_final: false,
-            });
-            seg.dutch = text;
-            state.emit("segment:pending", seg.clone());
+            let seg = pending.get_or_insert_with(PendingSeg::new);
+            seg.interim = text.clone();
+            state.emit("segment:pending", seg.to_segment(text, false));
         }
-        DeepgramEvent::Final { text, speech_final, .. } => {
-            let seg = pending.get_or_insert_with(|| Segment {
-                id: Uuid::new_v4(),
-                started_at: Utc::now(),
-                dutch: String::new(),
-                english: None,
-                speaker: None,
-                is_final: false,
-            });
-            // Each "is_final=true" event delivers a stable chunk of the utterance.
-            // Concatenate, then commit when speech_final arrives.
-            if seg.dutch.trim().is_empty() {
-                seg.dutch = text;
-            } else if !text.trim().is_empty() {
-                seg.dutch.push(' ');
-                seg.dutch.push_str(&text);
+        DeepgramEvent::Final { text, language, .. } => {
+            // Each is_final=true closes a chunk → commit as its own segment.
+            // This is what makes translation appear live — chunks fire every
+            // ~500ms of detected pause rather than waiting for speech_final.
+            let chunk = text.trim().to_string();
+            if chunk.is_empty() {
+                if let Some(p) = pending.as_mut() {
+                    p.interim.clear();
+                }
+                return;
             }
-            if speech_final {
-                seg.is_final = true;
-                let final_seg = pending.take().unwrap();
+            // Take the existing pending (so its id/started_at carry into
+            // this finalized segment), or mint a new one.
+            let p = pending.take().unwrap_or_else(PendingSeg::new);
+            let mut done = p.to_segment(chunk, true);
+
+            let translate_on = settings::read_translate_enabled();
+            if !translate_on || is_english(&language) {
+                // Translation disabled, or segment is already English —
+                // skip Claude. Mirror text into english so downstream
+                // (Copy EN, summary, chat) still has something coherent.
+                done.english = Some(done.dutch.clone());
                 {
                     let mut m = meeting.write();
-                    m.segments.push(final_seg.clone());
+                    m.segments.push(done.clone());
                 }
-                state.emit("segment:upsert", final_seg.clone());
-                spawn_translate(state.clone(), meeting.clone(), claude.clone(), final_seg);
+                state.emit("segment:upsert", done);
             } else {
-                state.emit("segment:pending", seg.clone());
+                {
+                    let mut m = meeting.write();
+                    m.segments.push(done.clone());
+                }
+                state.emit("segment:upsert", done.clone());
+                spawn_translate(state.clone(), meeting.clone(), claude.clone(), done);
             }
+            // pending stays None; next Interim/Final mints a fresh segment.
         }
         DeepgramEvent::UtteranceEnd => {
-            // Some Deepgram configs deliver UtteranceEnd separately. Use it as a
-            // safety-net commit when we have a pending segment that wasn't
-            // closed by speech_final yet.
-            if let Some(mut seg) = pending.take() {
-                if !seg.dutch.trim().is_empty() {
-                    seg.is_final = true;
+            // is_final commits everything, so usually there's nothing left.
+            // Safety net only.
+            if let Some(p) = pending.take() {
+                let dutch = p.interim.trim().to_string();
+                if !dutch.is_empty() {
+                    let done = p.to_segment(dutch, true);
                     {
                         let mut m = meeting.write();
-                        m.segments.push(seg.clone());
+                        m.segments.push(done.clone());
                     }
-                    state.emit("segment:upsert", seg.clone());
-                    spawn_translate(state.clone(), meeting.clone(), claude.clone(), seg);
+                    state.emit("segment:upsert", done.clone());
+                    spawn_translate(state.clone(), meeting.clone(), claude.clone(), done);
                 }
             }
         }

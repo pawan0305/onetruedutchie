@@ -7,6 +7,28 @@ import { SummaryPane } from "./components/SummaryPane";
 import { ChatPane } from "./components/ChatPane";
 import { SettingsModal } from "./components/SettingsModal";
 import { HistoryDrawer } from "./components/HistoryDrawer";
+import { Splitter } from "./components/Splitter";
+
+function usePersistedNumber(key: string, fallback: number): [number, (n: number) => void] {
+  const [value, setValue] = useState<number>(() => {
+    try {
+      const v = localStorage.getItem(key);
+      const n = v ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : fallback;
+    } catch {
+      return fallback;
+    }
+  });
+  const set = (n: number) => {
+    setValue(n);
+    try {
+      localStorage.setItem(key, String(n));
+    } catch {
+      /* noop */
+    }
+  };
+  return [value, set];
+}
 
 export function App() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
@@ -248,23 +270,41 @@ export function App() {
         onOpenSettings={() => setShowSettings(true)}
         onOpenHistory={() => setShowHistory(true)}
         onRenameMeeting={renameMeeting}
+        onToggleTranslate={async (enabled) => {
+          try {
+            setSettings(await api.setTranslateEnabled(enabled));
+          } catch (err) {
+            pushError(`translate toggle: ${err}`);
+          }
+        }}
         settings={settings}
       />
-      <div className="main">
-        <TranscriptPane segments={liveSegments} pendingId={pending?.id} />
-        <SummaryPane
-          summary={meeting?.summary ?? null}
-          updatedAt={meeting?.summary_updated_at ?? null}
-          onRegenerate={running ? regenerateSummary : undefined}
-        />
-        <ChatPane
-          history={meeting?.chat ?? []}
-          streamingId={streamingChatId}
-          streamingText={streamingChatText}
-          disabled={!meeting}
-          onAsk={ask}
-        />
-      </div>
+      <ResizableMain
+        transcript={
+          <TranscriptPane
+            segments={liveSegments}
+            pendingId={pending?.id}
+            meetingId={meeting?.id}
+            showEnglish={settings?.translate ?? true}
+          />
+        }
+        summary={
+          <SummaryPane
+            summary={meeting?.summary ?? null}
+            updatedAt={meeting?.summary_updated_at ?? null}
+            onRegenerate={running ? regenerateSummary : undefined}
+          />
+        }
+        chat={
+          <ChatPane
+            history={meeting?.chat ?? []}
+            streamingId={streamingChatId}
+            streamingText={streamingChatText}
+            disabled={!meeting}
+            onAsk={ask}
+          />
+        }
+      />
       {errors.length > 0 && (
         <div className="errors">
           {errors.map((e, i) => (
@@ -302,8 +342,54 @@ export function App() {
               pushError(`delete: ${err}`);
             }
           }}
+          onRename={async (id, title) => {
+            try {
+              await api.renameMeeting(id, title);
+              setHistory(await api.listMeetings());
+            } catch (err) {
+              pushError(`rename: ${err}`);
+            }
+          }}
         />
       )}
+    </div>
+  );
+}
+
+function ResizableMain({
+  transcript,
+  summary,
+  chat,
+}: {
+  transcript: React.ReactNode;
+  summary: React.ReactNode;
+  chat: React.ReactNode;
+}) {
+  const [transcriptW, setTranscriptW] = usePersistedNumber("paneW.transcript", 720);
+  const [summaryW, setSummaryW] = usePersistedNumber("paneW.summary", 420);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  return (
+    <div className="main">
+      <div
+        ref={transcriptRef}
+        className="pane-wrap"
+        style={{ flex: `0 0 ${transcriptW}px` }}
+      >
+        {transcript}
+      </div>
+      <Splitter onResize={setTranscriptW} leftPaneRef={transcriptRef} />
+      <div
+        ref={summaryRef}
+        className="pane-wrap"
+        style={{ flex: `0 0 ${summaryW}px` }}
+      >
+        {summary}
+      </div>
+      <Splitter onResize={setSummaryW} leftPaneRef={summaryRef} />
+      <div className="pane-wrap" style={{ flex: "1 1 0" }}>
+        {chat}
+      </div>
     </div>
   );
 }

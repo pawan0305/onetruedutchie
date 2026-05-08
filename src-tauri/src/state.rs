@@ -71,6 +71,18 @@ impl Meeting {
         }
         out
     }
+
+    /// Concatenated source-language transcript with timestamps. Each segment
+    /// keeps its detected language label so downstream tools (whole-document
+    /// translate / summarize / chat) know which lines are already English.
+    pub fn source_text(&self) -> String {
+        let mut out = String::new();
+        for seg in self.segments.iter().filter(|s| s.is_final) {
+            let ts = seg.started_at.format("%H:%M:%S");
+            out.push_str(&format!("[{ts}] {}\n", seg.dutch.trim()));
+        }
+        out
+    }
 }
 
 pub struct MeetingHandle {

@@ -119,13 +119,16 @@ fn resolve_sidecar(app: &AppHandle) -> Result<PathBuf> {
 
     // 1. Sibling of the executable. In Tauri 2 production builds, externalBin
     //    binaries are placed in `Contents/MacOS/` next to the main binary —
-    //    NOT in `Contents/Resources/`. This is also where dev binaries land
-    //    after `tauri build` in some configurations.
+    //    NOT in `Contents/Resources/`. Tauri strips the target-triple suffix
+    //    when bundling, so the file is named `audio-capture` rather than
+    //    `audio-capture-aarch64-apple-darwin` in the installed app.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let p = dir.join(&bundled_name);
-            if p.exists() {
-                return Ok(p);
+            for name in [bundled_name.as_str(), "audio-capture"] {
+                let p = dir.join(name);
+                if p.exists() {
+                    return Ok(p);
+                }
             }
         }
     }

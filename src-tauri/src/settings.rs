@@ -7,12 +7,20 @@ use std::path::PathBuf;
 pub struct ApiKeys {
     pub deepgram: Option<String>,
     pub anthropic: Option<String>,
+    /// Per-chunk Claude translation. When false, segments stay in the source
+    /// language (no Claude calls per chunk). User can flip this from the
+    /// top bar — for English meetings where translation is unnecessary.
+    #[serde(default = "default_translate")]
+    pub translate: bool,
 }
+
+fn default_translate() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsView {
     pub deepgram_set: bool,
     pub anthropic_set: bool,
+    pub translate: bool,
 }
 
 /// ~/Library/Application Support/com.onetruedutchie.app/keys.json
@@ -37,7 +45,29 @@ pub fn settings_view() -> Result<SettingsView> {
     Ok(SettingsView {
         deepgram_set: keys.deepgram.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
         anthropic_set: keys.anthropic.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+        translate: keys.translate,
     })
+}
+
+pub fn read_translate_enabled() -> bool {
+    read_keys().map(|k| k.translate).unwrap_or(true)
+}
+
+pub fn set_translate_enabled(enabled: bool) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    keys.translate = enabled;
+    let path = keys_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create config dir")?;
+    }
+    let data = serde_json::to_string_pretty(&keys).context("serialize keys")?;
+    fs::write(&path, &data).context("write keys file")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 pub fn write_keys(deepgram: Option<&str>, anthropic: Option<&str>) -> Result<()> {

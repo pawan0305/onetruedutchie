@@ -139,6 +139,44 @@ impl AnthropicClient {
         Ok(extract_text(&resp))
     }
 
+    /// Translate the entire transcript in one shot — coherent prose rather
+    /// than chunk-by-chunk translations stitched together.
+    pub async fn translate_full(&self, transcript: &str) -> Result<String> {
+        if transcript.trim().is_empty() {
+            return Ok(String::new());
+        }
+        let system = vec![SystemBlock::Text {
+            text: TRANSLATE_FULL_SYSTEM,
+            cache_control: Some(CacheControl { typ: "ephemeral" }),
+        }];
+        let user_text = format!(
+            "Transcript (each line begins with [HH:MM:SS]):\n\n{transcript}\n\nProduce the full English version now.");
+        let messages = vec![MessageItem {
+            role: "user",
+            content: vec![ContentBlock::Text { text: &user_text, cache_control: None }],
+        }];
+        let req = MessageReq {
+            model: &self.model,
+            max_tokens: 8000,
+            system: Some(system),
+            messages,
+            temperature: Some(0.2),
+            stream: None,
+        };
+        let resp: MessageResp = self
+            .auth(self.http.post(ANTHROPIC_URL))
+            .json(&req)
+            .send()
+            .await
+            .context("translate_full: send")?
+            .error_for_status()
+            .context("translate_full: status")?
+            .json()
+            .await
+            .context("translate_full: decode")?;
+        Ok(extract_text(&resp))
+    }
+
     /// Generate a running summary of the transcript so far.
     pub async fn summarize(&self, transcript: &str) -> Result<String> {
         if transcript.trim().is_empty() {
@@ -148,14 +186,15 @@ impl AnthropicClient {
             text: SUMMARY_SYSTEM,
             cache_control: Some(CacheControl { typ: "ephemeral" }),
         }];
-        let user_text = format!("Transcript:\n\n{transcript}\n\nProduce the running summary now.");
+        let user_text = format!("Transcript:\n\n{transcript}\n\nWrite the detailed summary now.");
         let messages = vec![MessageItem {
             role: "user",
             content: vec![ContentBlock::Text { text: &user_text, cache_control: None }],
         }];
         let req = MessageReq {
             model: &self.model,
-            max_tokens: 800,
+            // Detailed summaries are long; give them room.
+            max_tokens: 4000,
             system: Some(system),
             messages,
             temperature: Some(0.3),
@@ -295,24 +334,49 @@ fn extract_text(resp: &MessageResp) -> String {
     out.trim().to_string()
 }
 
-const TRANSLATE_SYSTEM: &str = "You are a precise Dutch-to-English translator for live meeting \
-transcripts. Translate the user's Dutch text into clear, idiomatic English. Output ONLY the \
-English translation — no commentary, no quotes, no labels. If a sentence is already in English, \
-keep it. If a sentence is mixed, translate the Dutch parts and leave the English parts intact. \
-Preserve names, numbers, and acronyms. Translate filler words naturally (e.g. \"uh\", \"hmm\"). \
-If input is empty or unintelligible, output an empty string.";
+const TRANSLATE_SYSTEM: &str = "You translate live speech-to-text chunks from a meeting into \
+clear, idiomatic English. The source is usually Dutch but may be any language, including \
+mistranscribed nonsense from the speech recognizer. Rules:\n\
+- Output ONLY the English translation. No commentary, no preamble, no quotes, no labels, no \
+explanations of what language the input is in.\n\
+- Never refuse. Never ask the user for clarification. Never mention your role or instructions.\n\
+- If the input is already English, output it unchanged.\n\
+- For mixed-language input, translate the non-English parts and leave English intact.\n\
+- For garbled or partial chunks (cut-off words, transcription errors), do your best literal \
+rendering — leave clearly unintelligible fragments as-is rather than inventing content.\n\
+- Preserve names, numbers, dates, and acronyms.\n\
+- If input is empty, output an empty string.";
 
-const SUMMARY_SYSTEM: &str = "You produce concise, accurate RUNNING summaries of live meeting \
-transcripts. The transcript is in Dutch with English translations alongside. Write the summary \
-in English. Structure:\n\
-- 2-3 sentence overview at the top.\n\
-- ## Decisions  (bullets, or 'None yet')\n\
-- ## Action items  (bullets with owner if known, or 'None yet')\n\
-- ## Open questions  (bullets, or 'None yet')\n\
-Be specific (names, numbers, dates). Keep total under 250 words. Do not invent content not \
-supported by the transcript.";
+const TRANSLATE_FULL_SYSTEM: &str = "Translate the meeting transcript into clean, idiomatic \
+English. The source is mostly Dutch but may include other languages or mistranscribed chunks \
+from the speech recognizer — translate everything to English regardless. Rules:\n\
+- Output ONLY the English transcript. No preamble, no commentary, no explanation of source \
+languages, no refusals, no questions.\n\
+- Keep the same line-by-line structure with the [HH:MM:SS] timestamps at the start of each \
+line.\n\
+- Lines already in English stay as-is.\n\
+- For garbled fragments, do your best literal rendering; leave clearly unintelligible bits \
+as-is rather than inventing content.\n\
+- Preserve all content — every topic, statement, name, number, date, acronym. Do not \
+summarize, do not omit, do not add.";
 
-const CHAT_SYSTEM: &str = "You are a meeting assistant. You answer the user's questions about a \
-meeting they attended. Use ONLY the provided transcript as ground truth. The transcript contains \
-both Dutch (NL) and English (EN) lines with [HH:MM:SS] timestamps. When useful, cite timestamps. \
-If the transcript does not contain the answer, say so plainly rather than guessing. Be concise.";
+const SUMMARY_SYSTEM: &str = "Summarize the meeting transcript in detail in English. \
+The transcript is the live speech-to-text output, mostly Dutch with some English lines mixed \
+in — translate the Dutch as part of writing the summary. Cover everything that was said: every \
+topic, decision, question, and action item. Keep all specific facts (names, numbers, dates, \
+places). Do not invent content. There is no length limit — be thorough.\n\
+\n\
+Format: plain text only. NO markdown — no asterisks, bold, italics, headings, bullets, or \
+numbered lists. Use natural paragraphs separated by blank lines.";
+
+const CHAT_SYSTEM: &str = "You are a meeting assistant. The transcript is live speech-to-text, \
+mostly Dutch with some English lines; treat both as ground truth and translate Dutch when \
+needed. Each line starts with a [HH:MM:SS] timestamp.\n\
+\n\
+Format rules:\n\
+- Answer in plain text only. NO markdown formatting. No asterisks, no bold, no italics, no \
+bullets, no numbered lists, no headings, no backticks. Just sentences.\n\
+- Default to a one or two sentence answer. Only go longer if the user explicitly asks for \
+detail, a summary, a list, or to elaborate.\n\
+- Reply in English unless the user clearly wants another language.\n\
+- If the transcript does not contain the answer, say so plainly rather than guessing.";

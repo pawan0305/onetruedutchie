@@ -10,6 +10,8 @@ export const api = {
   getSettings: () => invoke<SettingsView>("get_settings"),
   setApiKeys: (deepgram?: string, anthropic?: string) =>
     invoke<SettingsView>("set_api_keys", { deepgram, anthropic }),
+  setTranslateEnabled: (enabled: boolean) =>
+    invoke<SettingsView>("set_translate_enabled", { enabled }),
   startMeeting: (title?: string) =>
     invoke<Meeting>("start_meeting", { title }),
   stopMeeting: () => invoke<Meeting>("stop_meeting"),
@@ -19,6 +21,10 @@ export const api = {
   listMeetings: () => invoke<MeetingSummaryRow[]>("list_meetings"),
   loadMeeting: (id: string) => invoke<Meeting>("load_meeting", { id }),
   deleteMeeting: (id: string) => invoke<void>("delete_meeting", { id }),
+  renameMeeting: (id: string, title: string) =>
+    invoke<void>("rename_meeting", { id, title }),
+  exportEnglishTranscript: (id?: string) =>
+    invoke<string>("export_english_transcript", { id }),
   regenerateSummary: () => invoke<void>("regenerate_summary"),
   askQuestion: (question: string, meetingId?: string) =>
     invoke<{ stream_id: string }>("ask_question", {

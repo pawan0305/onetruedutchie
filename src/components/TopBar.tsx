@@ -10,6 +10,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenHistory: () => void;
   onRenameMeeting: (title: string) => void;
+  onToggleTranslate: (enabled: boolean) => void;
 }
 
 export function TopBar({
@@ -21,6 +22,7 @@ export function TopBar({
   onOpenSettings,
   onOpenHistory,
   onRenameMeeting,
+  onToggleTranslate,
 }: Props) {
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
 
@@ -70,6 +72,15 @@ export function TopBar({
             ⚠ keys not set
           </span>
         )}
+        <button
+          className={`ghost ${settings?.translate ? "" : "muted"}`}
+          onClick={() => onToggleTranslate(!(settings?.translate ?? true))}
+          title={settings?.translate
+            ? "Translation on — click to turn off"
+            : "Translation off — click to turn on"}
+        >
+          Translate: {settings?.translate ? "on" : "off"}
+        </button>
         <button onClick={onOpenHistory}>History</button>
         {running ? (
           <button className="primary danger" onClick={onStop}>
