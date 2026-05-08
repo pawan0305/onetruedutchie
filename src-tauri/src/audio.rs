@@ -1,0 +1,150 @@
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::Arc;
+
+use anyhow::{anyhow, Context, Result};
+use bytes::Bytes;
+use tauri::path::BaseDirectory;
+use tauri::{AppHandle, Manager};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+const READ_CHUNK: usize = 4096;
+
+pub struct AudioCapture {
+    pub child: Child,
+}
+
+/// Spawn the Swift `audio-capture` sidecar.  Returns a channel of raw 16 kHz
+/// mono Int16 LE PCM bytes (Bytes per chunk) and a handle to the child process.
+///
+/// `cancel` is used to terminate the sidecar when the meeting stops.
+pub async fn start_capture(
+    app: &AppHandle,
+    cancel: CancellationToken,
+    include_mic: bool,
+) -> Result<mpsc::Receiver<Bytes>> {
+    let bin = resolve_sidecar(app)?;
+    tracing::info!(?bin, "spawning audio sidecar");
+
+    let mut cmd = Command::new(&bin);
+    if !include_mic {
+        cmd.arg("--no-mic");
+    }
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = cmd.spawn().with_context(|| format!("spawn {:?}", bin))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("no stdout from sidecar"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("no stderr from sidecar"))?;
+    // Keep stdin alive to detect EOF cleanly when we drop.
+    let stdin = child.stdin.take();
+    let stdin = Arc::new(parking_lot::Mutex::new(stdin));
+
+    let (tx, rx) = mpsc::channel::<Bytes>(64);
+
+    // Pipe stderr -> tracing
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            if let Some(rest) = line.strip_prefix("ERR ") {
+                tracing::warn!(target: "audio_sidecar", "{}", rest);
+            } else if let Some(rest) = line.strip_prefix("LOG ") {
+                tracing::info!(target: "audio_sidecar", "{}", rest);
+            } else {
+                tracing::info!(target: "audio_sidecar", "{}", line);
+            }
+        }
+    });
+
+    // Pipe stdout (raw PCM) -> mpsc channel
+    {
+        let cancel = cancel.clone();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; READ_CHUNK];
+            let mut stdout = stdout;
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    res = stdout.read(&mut buf) => match res {
+                        Ok(0) => break, // EOF
+                        Ok(n) => {
+                            if tx.send(Bytes::copy_from_slice(&buf[..n])).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(?err, "audio stdout read error");
+                            break;
+                        }
+                    }
+                }
+            }
+            tracing::info!("audio stdout pipe closed");
+        });
+    }
+
+    // Cancel-on-shutdown: close stdin & kill child if cancellation arrives.
+    tokio::spawn(async move {
+        cancel.cancelled().await;
+        // Drop stdin to signal sidecar to exit, then ensure it dies.
+        let mut guard = stdin.lock();
+        guard.take(); // drops, closing the pipe
+        drop(guard);
+        // Give it a moment to exit gracefully, then kill.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    });
+
+    Ok(rx)
+}
+
+fn resolve_sidecar(app: &AppHandle) -> Result<PathBuf> {
+    let triple = if cfg!(target_arch = "aarch64") {
+        "aarch64-apple-darwin"
+    } else if cfg!(target_arch = "x86_64") {
+        "x86_64-apple-darwin"
+    } else {
+        return Err(anyhow!("unsupported architecture for audio sidecar"));
+    };
+    let bundled_name = format!("audio-capture-{triple}");
+
+    // 1. Bundled resource location.
+    if let Ok(p) = app.path().resolve(&bundled_name, BaseDirectory::Resource) {
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    // 2. Dev location: <crate>/binaries/audio-capture-<triple>
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(&bundled_name);
+    if dev.exists() {
+        return Ok(dev);
+    }
+    // 3. Sibling of the executable.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join(&bundled_name);
+            if p.exists() {
+                return Ok(p);
+            }
+        }
+    }
+    Err(anyhow!(
+        "audio sidecar not found. Expected `{}` in resources or `src-tauri/binaries/`. \
+         Run `npm run build:swift` to compile it.",
+        bundled_name
+    ))
+}

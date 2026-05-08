@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>OneTrueDutchie captures your microphone so it can transcribe and translate what you say in meetings.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>OneTrueDutchie captures system audio so it can transcribe and translate Teams, Zoom, and other meetings.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>OneTrueDutchie uses system audio for live transcription.</string>
+</dict>
+</plist>
