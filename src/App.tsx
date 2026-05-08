@@ -218,7 +218,7 @@ export function App() {
 
   const regenerateSummary = useCallback(async () => {
     try {
-      await api.regenerateSummary();
+      await api.regenerateSummary(meetingRef.current?.id);
     } catch (err) {
       pushError(`summary: ${err}`);
     }
@@ -292,7 +292,7 @@ export function App() {
           <SummaryPane
             summary={meeting?.summary ?? null}
             updatedAt={meeting?.summary_updated_at ?? null}
-            onRegenerate={running ? regenerateSummary : undefined}
+            onRegenerate={meeting ? regenerateSummary : undefined}
           />
         }
         chat={

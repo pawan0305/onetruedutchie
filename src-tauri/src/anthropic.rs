@@ -150,7 +150,7 @@ impl AnthropicClient {
             cache_control: Some(CacheControl { typ: "ephemeral" }),
         }];
         let user_text = format!(
-            "Transcript (each line begins with [HH:MM:SS]):\n\n{transcript}\n\nProduce the full English version now.");
+            "Transcript:\n\n{transcript}\n\nProduce the full English version now.");
         let messages = vec![MessageItem {
             role: "user",
             content: vec![ContentBlock::Text { text: &user_text, cache_control: None }],
@@ -348,17 +348,17 @@ rendering — leave clearly unintelligible fragments as-is rather than inventing
 - If input is empty, output an empty string.";
 
 const TRANSLATE_FULL_SYSTEM: &str = "Translate the meeting transcript into clean, idiomatic \
-English. The source is mostly Dutch but may include other languages or mistranscribed chunks \
-from the speech recognizer — translate everything to English regardless. Rules:\n\
-- Output ONLY the English transcript. No preamble, no commentary, no explanation of source \
+English as one coherent piece of natural prose. The source is mostly Dutch but may include \
+other languages or mistranscribed chunks from the speech recognizer — translate everything to \
+English regardless. Rules:\n\
+- Output ONLY the English translation. No preamble, no commentary, no explanation of source \
 languages, no refusals, no questions.\n\
-- Keep the same line-by-line structure with the [HH:MM:SS] timestamps at the start of each \
-line.\n\
 - Lines already in English stay as-is.\n\
 - For garbled fragments, do your best literal rendering; leave clearly unintelligible bits \
 as-is rather than inventing content.\n\
-- Preserve all content — every topic, statement, name, number, date, acronym. Do not \
-summarize, do not omit, do not add.";
+- Preserve all content — every statement, name, number, date, acronym. Do not summarize, do \
+not omit, do not add.\n\
+- Plain text only — no markdown, no bullets, no headings. Use natural paragraph breaks.";
 
 const SUMMARY_SYSTEM: &str = "Summarize the meeting transcript in detail in English. \
 The transcript is the live speech-to-text output, mostly Dutch with some English lines mixed \
@@ -371,7 +371,7 @@ numbered lists. Use natural paragraphs separated by blank lines.";
 
 const CHAT_SYSTEM: &str = "You are a meeting assistant. The transcript is live speech-to-text, \
 mostly Dutch with some English lines; treat both as ground truth and translate Dutch when \
-needed. Each line starts with a [HH:MM:SS] timestamp.\n\
+needed.\n\
 \n\
 Format rules:\n\
 - Answer in plain text only. NO markdown formatting. No asterisks, no bold, no italics, no \

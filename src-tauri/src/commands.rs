@@ -241,34 +241,97 @@ pub async fn rename_meeting(
 }
 
 #[tauri::command]
-pub async fn regenerate_summary(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    let Some(handle) = state.current() else {
-        return Err("no meeting in progress".into());
-    };
+pub async fn regenerate_summary(
+    id: Option<Uuid>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
     let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
     let claude = AnthropicClient::new(an_key);
-    // Feed the source-language transcript so Claude sees the full picture
-    // and translates+summarizes coherently rather than re-using the choppy
-    // per-chunk translations.
-    let transcript = handle.meeting.read().source_text();
-    if transcript.is_empty() {
+    let app_state = state.inner().clone();
+
+    // Decide which meeting we're summarizing: the live one if `id` matches
+    // (or is None and a meeting is running), otherwise a historical meeting
+    // loaded from disk.
+    let live_handle = state.current().filter(|h| {
+        match id {
+            None => true,
+            Some(want) => h.meeting.read().id == want,
+        }
+    });
+
+    if let Some(handle) = live_handle {
+        let transcript = handle.meeting.read().source_text();
+        if transcript.trim().is_empty() {
+            return Ok(());
+        }
+        let meeting = handle.meeting.clone();
+        tokio::spawn(async move {
+            match claude.summarize(&transcript).await {
+                Ok(s) => {
+                    let now = Utc::now();
+                    {
+                        let mut m = meeting.write();
+                        m.summary = Some(s.clone());
+                        m.summary_updated_at = Some(now);
+                    }
+                    app_state.emit(
+                        "summary:update",
+                        json!({ "summary": s, "updated_at": now }),
+                    );
+                }
+                Err(err) => {
+                    app_state.emit(
+                        "error",
+                        json!({ "message": format!("summary failed: {err}") }),
+                    );
+                }
+            }
+        });
         return Ok(());
     }
-    let app_state = state.inner().clone();
-    let meeting = handle.meeting.clone();
+
+    // Historical meeting path: load → summarize → save → emit update so the
+    // pane refreshes.
+    let Some(meeting_id) = id else {
+        return Err("no meeting".into());
+    };
+    let dir = state.meetings_dir();
     tokio::spawn(async move {
+        let load_dir = dir.clone();
+        let m = match tokio::task::spawn_blocking(move || storage::load_meeting(&load_dir, meeting_id))
+            .await
+        {
+            Ok(Ok(m)) => m,
+            other => {
+                app_state.emit(
+                    "error",
+                    json!({ "message": format!("load failed: {other:?}") }),
+                );
+                return;
+            }
+        };
+        let transcript = m.source_text();
+        if transcript.trim().is_empty() {
+            return;
+        }
         match claude.summarize(&transcript).await {
             Ok(s) => {
                 let now = Utc::now();
-                {
-                    let mut m = meeting.write();
-                    m.summary = Some(s.clone());
-                    m.summary_updated_at = Some(now);
-                }
+                let mut updated = m.clone();
+                updated.summary = Some(s.clone());
+                updated.summary_updated_at = Some(now);
+                let save_dir = dir.clone();
+                let to_save = updated.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    storage::save_meeting(&save_dir, &to_save)
+                })
+                .await;
                 app_state.emit(
                     "summary:update",
                     json!({ "summary": s, "updated_at": now }),
                 );
+                // Rebroadcast the meeting so the UI refreshes the pane.
+                app_state.emit("meeting:update", updated);
             }
             Err(err) => {
                 app_state.emit(

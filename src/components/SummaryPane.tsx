@@ -10,14 +10,14 @@ export function SummaryPane({ summary, updatedAt, onRegenerate }: Props) {
       <header className="pane-header">
         <h2>Summary</h2>
         <div className="pane-sub-row">
-          <span className="pane-sub">
-            {updatedAt
-              ? `updated ${new Date(updatedAt).toLocaleTimeString()}`
-              : "auto-refreshes every 2 min"}
-          </span>
+          {updatedAt && (
+            <span className="pane-sub">
+              updated {new Date(updatedAt).toLocaleTimeString()}
+            </span>
+          )}
           {onRegenerate && (
             <button className="ghost" onClick={onRegenerate}>
-              ↻ refresh
+              {summary ? "↻ regenerate" : "Generate"}
             </button>
           )}
         </div>
@@ -27,8 +27,7 @@ export function SummaryPane({ summary, updatedAt, onRegenerate }: Props) {
           <pre className="summary-text">{summary}</pre>
         ) : (
           <div className="empty">
-            No summary yet. The first one is generated about two minutes after the
-            meeting starts.
+            No summary yet — click <strong>Generate</strong> when you want one.
           </div>
         )}
       </div>

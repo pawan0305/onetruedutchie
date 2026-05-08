@@ -72,14 +72,17 @@ impl Meeting {
         out
     }
 
-    /// Concatenated source-language transcript with timestamps. Each segment
-    /// keeps its detected language label so downstream tools (whole-document
-    /// translate / summarize / chat) know which lines are already English.
+    /// Concatenated source-language transcript, plain text — no timestamps.
+    /// Fed to Claude for translate / summarize / chat. Timestamps were
+    /// noise; they showed up in the copied transcript and made Claude's
+    /// output less readable.
     pub fn source_text(&self) -> String {
         let mut out = String::new();
         for seg in self.segments.iter().filter(|s| s.is_final) {
-            let ts = seg.started_at.format("%H:%M:%S");
-            out.push_str(&format!("[{ts}] {}\n", seg.dutch.trim()));
+            let line = seg.dutch.trim();
+            if line.is_empty() { continue; }
+            out.push_str(line);
+            out.push('\n');
         }
         out
     }

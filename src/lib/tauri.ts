@@ -25,7 +25,7 @@ export const api = {
     invoke<void>("rename_meeting", { id, title }),
   exportEnglishTranscript: (id?: string) =>
     invoke<string>("export_english_transcript", { id }),
-  regenerateSummary: () => invoke<void>("regenerate_summary"),
+  regenerateSummary: (id?: string) => invoke<void>("regenerate_summary", { id }),
   askQuestion: (question: string, meetingId?: string) =>
     invoke<{ stream_id: string }>("ask_question", {
       question,
