@@ -18,9 +18,11 @@ No backend. API keys stay in your macOS Keychain. Meetings are stored locally.
 git clone https://github.com/pawan0305/onetruedutchie.git
 cd onetruedutchie
 
-# 2. One command — sets up on first run, then starts the app
-npm start
+# 2. Build, sign, and install to /Applications (one command)
+bash scripts/install.sh
 ```
+
+Launch from Spotlight / Launchpad / `open /Applications/OneTrueDutchie.app`.
 
 When the app opens:
 - Paste your **Deepgram** and **Anthropic** API keys in Settings.

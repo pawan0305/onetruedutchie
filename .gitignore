@@ -3,6 +3,11 @@ dist/
 dist-ssr/
 *.local
 
+# TypeScript build artifacts
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
 # Tauri
 src-tauri/target/
 src-tauri/binaries/
