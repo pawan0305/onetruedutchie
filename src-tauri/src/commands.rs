@@ -202,16 +202,22 @@ pub async fn ask_question(
     }
     let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
 
-    // Pick the meeting: live one, or a saved one by id.
-    let meeting_arc: Arc<RwLock<Meeting>> = if let Some(handle) = state.current() {
+    // Pick the meeting: an explicitly-supplied id wins (so the user can ask
+    // questions of a saved meeting while a different one is being recorded),
+    // otherwise fall back to the live meeting.
+    let meeting_arc: Arc<RwLock<Meeting>> = if let Some(id) = meeting_id {
+        if let Some(handle) = state.current().filter(|h| h.meeting.read().id == id) {
+            handle.meeting.clone()
+        } else {
+            let dir = state.meetings_dir();
+            let m = tokio::task::spawn_blocking(move || storage::load_meeting(&dir, id))
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+            Arc::new(RwLock::new(m))
+        }
+    } else if let Some(handle) = state.current() {
         handle.meeting.clone()
-    } else if let Some(id) = meeting_id {
-        let dir = state.meetings_dir();
-        let m = tokio::task::spawn_blocking(move || storage::load_meeting(&dir, id))
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?;
-        Arc::new(RwLock::new(m))
     } else {
         return Err("no current meeting and no meeting_id given".into());
     };

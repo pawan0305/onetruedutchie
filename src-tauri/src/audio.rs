@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
@@ -47,9 +46,9 @@ pub async fn start_capture(
         .stderr
         .take()
         .ok_or_else(|| anyhow!("no stderr from sidecar"))?;
-    // Keep stdin alive to detect EOF cleanly when we drop.
+    // Keep stdin so we can drop it on cancel — closing the pipe lets the
+    // sidecar exit cleanly via its EOF watcher before we resort to SIGKILL.
     let stdin = child.stdin.take();
-    let stdin = Arc::new(parking_lot::Mutex::new(stdin));
 
     let (tx, rx) = mpsc::channel::<Bytes>(64);
 
@@ -98,9 +97,7 @@ pub async fn start_capture(
     tokio::spawn(async move {
         cancel.cancelled().await;
         // Drop stdin to signal sidecar to exit, then ensure it dies.
-        let mut guard = stdin.lock();
-        guard.take(); // drops, closing the pipe
-        drop(guard);
+        drop(stdin);
         // Give it a moment to exit gracefully, then kill.
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let _ = child.start_kill();
@@ -120,20 +117,10 @@ fn resolve_sidecar(app: &AppHandle) -> Result<PathBuf> {
     };
     let bundled_name = format!("audio-capture-{triple}");
 
-    // 1. Bundled resource location.
-    if let Ok(p) = app.path().resolve(&bundled_name, BaseDirectory::Resource) {
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-    // 2. Dev location: <crate>/binaries/audio-capture-<triple>
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("binaries")
-        .join(&bundled_name);
-    if dev.exists() {
-        return Ok(dev);
-    }
-    // 3. Sibling of the executable.
+    // 1. Sibling of the executable. In Tauri 2 production builds, externalBin
+    //    binaries are placed in `Contents/MacOS/` next to the main binary —
+    //    NOT in `Contents/Resources/`. This is also where dev binaries land
+    //    after `tauri build` in some configurations.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let p = dir.join(&bundled_name);
@@ -142,9 +129,23 @@ fn resolve_sidecar(app: &AppHandle) -> Result<PathBuf> {
             }
         }
     }
+    // 2. Bundled resource location (some Tauri configurations route here).
+    if let Ok(p) = app.path().resolve(&bundled_name, BaseDirectory::Resource) {
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    // 3. Dev location: <crate>/binaries/audio-capture-<triple>
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(&bundled_name);
+    if dev.exists() {
+        return Ok(dev);
+    }
     Err(anyhow!(
-        "audio sidecar not found. Expected `{}` in resources or `src-tauri/binaries/`. \
-         Run `npm run build:swift` to compile it.",
+        "audio sidecar not found. Expected `{}` next to the app binary, in \
+         the resource dir, or under `src-tauri/binaries/`. Run \
+         `npm run build:swift` to compile it.",
         bundled_name
     ))
 }

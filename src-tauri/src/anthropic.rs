@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-pub const MODEL_HAIKU: &str = "claude-haiku-4-5";
+pub const MODEL_HAIKU: &str = "claude-haiku-4-5-20251001";
 
 pub struct AnthropicClient {
     api_key: String,
@@ -241,12 +241,14 @@ impl AnthropicClient {
 
         let mut stream = resp.bytes_stream().eventsource();
         let mut accumulated = String::new();
+        let mut stream_error: Option<anyhow::Error> = None;
         while let Some(event) = stream.next().await {
             let event = match event {
                 Ok(e) => e,
                 Err(err) => {
                     let _ = tx.send(ChatStreamEvent::Error(format!("{err}"))).await;
-                    return Err(err.into());
+                    stream_error = Some(err.into());
+                    break;
                 }
             };
             match event.event.as_str() {
@@ -267,12 +269,18 @@ impl AnthropicClient {
                 "message_stop" => break,
                 "error" => {
                     let _ = tx.send(ChatStreamEvent::Error(event.data.clone())).await;
-                    return Err(anyhow!("chat error: {}", event.data));
+                    stream_error = Some(anyhow!("chat error: {}", event.data));
+                    break;
                 }
                 _ => {}
             }
         }
+        // Always emit Done so any partial answer gets persisted by the caller,
+        // even if the stream errored partway through.
         let _ = tx.send(ChatStreamEvent::Done(accumulated)).await;
+        if let Some(err) = stream_error {
+            return Err(err);
+        }
         Ok(())
     }
 }
