@@ -1,12 +1,9 @@
 use anyhow::{Context, Result};
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 
-const SERVICE: &str = "com.onetruedutchie.app";
-const DEEPGRAM_KEY: &str = "deepgram_api_key";
-const ANTHROPIC_KEY: &str = "anthropic_api_key";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ApiKeys {
     pub deepgram: Option<String>,
     pub anthropic: Option<String>,
@@ -18,46 +15,50 @@ pub struct SettingsView {
     pub anthropic_set: bool,
 }
 
-fn entry(name: &str) -> Result<Entry> {
-    Entry::new(SERVICE, name).context("keyring entry")
+/// ~/Library/Application Support/com.onetruedutchie.app/keys.json
+fn keys_path() -> PathBuf {
+    let base = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(base)
+        .join("Library/Application Support/com.onetruedutchie.app")
+        .join("keys.json")
 }
 
 pub fn read_keys() -> Result<ApiKeys> {
-    let deepgram = match entry(DEEPGRAM_KEY)?.get_password() {
-        Ok(v) => Some(v),
-        Err(keyring::Error::NoEntry) => None,
-        Err(e) => return Err(e.into()),
-    };
-    let anthropic = match entry(ANTHROPIC_KEY)?.get_password() {
-        Ok(v) => Some(v),
-        Err(keyring::Error::NoEntry) => None,
-        Err(e) => return Err(e.into()),
-    };
-    Ok(ApiKeys { deepgram, anthropic })
+    let path = keys_path();
+    if !path.exists() {
+        return Ok(ApiKeys::default());
+    }
+    let data = fs::read_to_string(&path).context("read keys file")?;
+    serde_json::from_str(&data).context("parse keys file")
 }
 
 pub fn settings_view() -> Result<SettingsView> {
     let keys = read_keys()?;
     Ok(SettingsView {
-        deepgram_set: keys.deepgram.as_deref().map(str::is_empty).map(|e| !e).unwrap_or(false),
-        anthropic_set: keys.anthropic.as_deref().map(str::is_empty).map(|e| !e).unwrap_or(false),
+        deepgram_set: keys.deepgram.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+        anthropic_set: keys.anthropic.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
     })
 }
 
 pub fn write_keys(deepgram: Option<&str>, anthropic: Option<&str>) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
     if let Some(v) = deepgram {
-        if v.is_empty() {
-            let _ = entry(DEEPGRAM_KEY)?.delete_credential();
-        } else {
-            entry(DEEPGRAM_KEY)?.set_password(v).context("set deepgram")?;
-        }
+        keys.deepgram = if v.is_empty() { None } else { Some(v.to_string()) };
     }
     if let Some(v) = anthropic {
-        if v.is_empty() {
-            let _ = entry(ANTHROPIC_KEY)?.delete_credential();
-        } else {
-            entry(ANTHROPIC_KEY)?.set_password(v).context("set anthropic")?;
-        }
+        keys.anthropic = if v.is_empty() { None } else { Some(v.to_string()) };
+    }
+    let path = keys_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("create config dir")?;
+    }
+    let data = serde_json::to_string_pretty(&keys).context("serialize keys")?;
+    fs::write(&path, &data).context("write keys file")?;
+    // owner read/write only — equivalent to chmod 600
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     }
     Ok(())
 }
