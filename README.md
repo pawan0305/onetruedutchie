@@ -18,11 +18,8 @@ No backend. API keys stay in your macOS Keychain. Meetings are stored locally.
 git clone https://github.com/pawan0305/onetruedutchie.git
 cd onetruedutchie
 
-# 2. One-shot setup (installs Rust if missing, builds the Swift sidecar)
-bash scripts/setup.sh
-
-# 3. Run
-npm run tauri dev
+# 2. One command — sets up on first run, then starts the app
+npm start
 ```
 
 When the app opens:

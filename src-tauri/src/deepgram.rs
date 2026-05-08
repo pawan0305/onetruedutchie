@@ -113,7 +113,7 @@ pub async fn run(
                 }
                 chunk = audio_rx.recv() => match chunk {
                     Some(bytes) => {
-                        if sink.send(Message::Binary(bytes)).await.is_err() {
+                        if sink.send(Message::Binary(bytes.to_vec())).await.is_err() {
                             break;
                         }
                     }
