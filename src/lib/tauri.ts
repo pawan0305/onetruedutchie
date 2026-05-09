@@ -14,6 +14,10 @@ export const api = {
     invoke<SettingsView>("set_translate_enabled", { enabled }),
   setOverlayMode: (mode: "off" | "dual" | "en") =>
     invoke<SettingsView>("set_overlay_mode", { mode }),
+  setOverlayFontSize: (size: number) =>
+    invoke<SettingsView>("set_overlay_font_size", { size }),
+  setOverlayLocked: (locked: boolean) =>
+    invoke<SettingsView>("set_overlay_locked", { locked }),
   startMeeting: (title?: string) =>
     invoke<Meeting>("start_meeting", { title }),
   stopMeeting: () => invoke<Meeting>("stop_meeting"),

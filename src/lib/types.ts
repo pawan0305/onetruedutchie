@@ -29,6 +29,8 @@ export interface SettingsView {
   anthropic_set: boolean;
   translate: boolean;
   overlay_mode: string; // "off" | "dual" | "en"
+  overlay_font_size: number;
+  overlay_locked: boolean;
 }
 
 export interface MeetingSummaryRow {

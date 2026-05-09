@@ -15,6 +15,13 @@ pub struct ApiKeys {
     /// Subtitle overlay mode: "off" | "dual" (NL+EN) | "en" (EN only).
     #[serde(default = "default_overlay")]
     pub overlay_mode: String,
+    /// Subtitle font size in px.
+    #[serde(default = "default_overlay_size")]
+    pub overlay_font_size: u32,
+    /// When true the overlay is click-through (locked). When false the user
+    /// can grab and drag/resize it.
+    #[serde(default = "default_overlay_locked")]
+    pub overlay_locked: bool,
 }
 
 impl Default for ApiKeys {
@@ -24,12 +31,16 @@ impl Default for ApiKeys {
             anthropic: None,
             translate: default_translate(),
             overlay_mode: default_overlay(),
+            overlay_font_size: default_overlay_size(),
+            overlay_locked: default_overlay_locked(),
         }
     }
 }
 
 fn default_translate() -> bool { true }
 fn default_overlay() -> String { "off".to_string() }
+fn default_overlay_size() -> u32 { 24 }
+fn default_overlay_locked() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsView {
@@ -37,6 +48,8 @@ pub struct SettingsView {
     pub anthropic_set: bool,
     pub translate: bool,
     pub overlay_mode: String,
+    pub overlay_font_size: u32,
+    pub overlay_locked: bool,
 }
 
 /// ~/Library/Application Support/com.onetruedutchie.app/keys.json
@@ -63,6 +76,8 @@ pub fn settings_view() -> Result<SettingsView> {
         anthropic_set: keys.anthropic.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
         translate: keys.translate,
         overlay_mode: keys.overlay_mode.clone(),
+        overlay_font_size: keys.overlay_font_size,
+        overlay_locked: keys.overlay_locked,
     })
 }
 
@@ -70,14 +85,16 @@ pub fn read_overlay_mode() -> String {
     read_keys().map(|k| k.overlay_mode).unwrap_or_else(|_| "off".into())
 }
 
-pub fn set_overlay_mode(mode: &str) -> Result<()> {
-    let mut keys = read_keys().unwrap_or_default();
-    keys.overlay_mode = mode.to_string();
+pub fn read_overlay_locked() -> bool {
+    read_keys().map(|k| k.overlay_locked).unwrap_or(true)
+}
+
+fn write_keys_back(keys: &ApiKeys) -> Result<()> {
     let path = keys_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context("create config dir")?;
     }
-    let data = serde_json::to_string_pretty(&keys).context("serialize keys")?;
+    let data = serde_json::to_string_pretty(keys).context("serialize keys")?;
     fs::write(&path, &data).context("write keys file")?;
     #[cfg(unix)]
     {
@@ -85,6 +102,25 @@ pub fn set_overlay_mode(mode: &str) -> Result<()> {
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     }
     Ok(())
+}
+
+pub fn set_overlay_mode(mode: &str) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    keys.overlay_mode = mode.to_string();
+    write_keys_back(&keys)
+}
+
+pub fn set_overlay_font_size(size: u32) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    // Clamp to a sensible range so a typo can't make the overlay unusable.
+    keys.overlay_font_size = size.clamp(12, 64);
+    write_keys_back(&keys)
+}
+
+pub fn set_overlay_locked(locked: bool) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    keys.overlay_locked = locked;
+    write_keys_back(&keys)
 }
 
 pub fn read_translate_enabled() -> bool {

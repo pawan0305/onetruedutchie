@@ -17,9 +17,10 @@ html, body, #overlay-root {
 }
 
 .overlay-shell {
+  --overlay-font-size: 24px;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.62);
+  background: rgba(0, 0, 0, 0.38);
   border-radius: 10px;
   padding: 14px 20px;
   display: flex;
@@ -40,9 +41,14 @@ html, body, #overlay-root {
 }
 
 .overlay-line {
-  font-size: 24px;
+  font-size: var(--overlay-font-size);
   line-height: 1.25;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+  /* Heavy text-shadow keeps the words legible over the more translucent
+     background (and over whatever's behind it when you crank up alpha). */
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 6px rgba(0, 0, 0, 0.85);
+  font-weight: 500;
 }
 .overlay-line .row.nl {
   color: #ffb380;

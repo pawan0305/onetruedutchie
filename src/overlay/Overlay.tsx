@@ -12,6 +12,8 @@ interface Segment {
 
 interface Settings {
   overlay_mode: string;
+  overlay_font_size: number;
+  overlay_locked: boolean;
 }
 
 const MAX_LINES = 3;
@@ -20,9 +22,15 @@ export function Overlay() {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [pending, setPending] = useState<Segment | null>(null);
   const [mode, setMode] = useState<string>("dual");
+  const [fontSize, setFontSize] = useState<number>(24);
 
   useEffect(() => {
-    invoke<Settings>("get_settings").then((s) => setMode(s.overlay_mode || "dual")).catch(() => {});
+    invoke<Settings>("get_settings")
+      .then((s) => {
+        setMode(s.overlay_mode || "dual");
+        if (s.overlay_font_size) setFontSize(s.overlay_font_size);
+      })
+      .catch(() => {});
 
     const promises: Promise<UnlistenFn>[] = [
       listen<Segment>("segment:upsert", (e) => {
@@ -47,6 +55,9 @@ export function Overlay() {
       }),
       listen<Segment>("segment:pending", (e) => setPending(e.payload)),
       listen<{ mode: string }>("overlay:mode", (e) => setMode(e.payload.mode)),
+      listen<{ font_size: number; locked: boolean }>("overlay:settings", (e) => {
+        if (e.payload.font_size) setFontSize(e.payload.font_size);
+      }),
       listen<unknown>("meeting:started", () => {
         // Fresh meeting → clear stale subtitles.
         setSegments([]);
@@ -66,7 +77,11 @@ export function Overlay() {
   const showEN = mode === "dual" || mode === "en";
 
   return (
-    <div className="overlay-shell" data-tauri-drag-region>
+    <div
+      className="overlay-shell"
+      data-tauri-drag-region
+      style={{ ["--overlay-font-size" as any]: `${fontSize}px` }}
+    >
       <div className="overlay-lines" data-tauri-drag-region>
         {segments.length === 0 && !pending && (
           <div className="overlay-line muted" data-tauri-drag-region>

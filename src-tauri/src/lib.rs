@@ -56,11 +56,13 @@ pub fn run() {
             let state = AppState::new(app_handle, data_dir);
             app.manage(Arc::new(state));
 
-            // Apply persisted overlay mode. If the user had subtitles on
-            // when they last quit, show the overlay window now.
+            // Apply persisted overlay mode + lock. If the user had subtitles
+            // on when they last quit, show the overlay window now and apply
+            // the click-through state.
             let mode = settings::read_overlay_mode();
-            if mode != "off" {
-                if let Some(win) = app.get_webview_window("overlay") {
+            let locked = settings::read_overlay_locked();
+            if let Some(win) = app.get_webview_window("overlay") {
+                if mode != "off" {
                     let _ = win.show();
                     let _ = win.set_always_on_top(true);
                     #[cfg(target_os = "macos")]
@@ -68,6 +70,7 @@ pub fn run() {
                         let _ = win.set_visible_on_all_workspaces(true);
                     }
                 }
+                let _ = win.set_ignore_cursor_events(locked);
             }
             Ok(())
         })
@@ -76,6 +79,8 @@ pub fn run() {
             commands::set_api_keys,
             commands::set_translate_enabled,
             commands::set_overlay_mode,
+            commands::set_overlay_font_size,
+            commands::set_overlay_locked,
             commands::start_meeting,
             commands::stop_meeting,
             commands::current_meeting,

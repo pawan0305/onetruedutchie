@@ -286,6 +286,22 @@ export function App() {
             pushError(`overlay: ${err}`);
           }
         }}
+        onChangeOverlayFontSize={async (delta) => {
+          const cur = settings?.overlay_font_size ?? 24;
+          const next = Math.max(12, Math.min(64, cur + delta));
+          try {
+            setSettings(await api.setOverlayFontSize(next));
+          } catch (err) {
+            pushError(`overlay font: ${err}`);
+          }
+        }}
+        onToggleOverlayLocked={async () => {
+          try {
+            setSettings(await api.setOverlayLocked(!(settings?.overlay_locked ?? true)));
+          } catch (err) {
+            pushError(`overlay lock: ${err}`);
+          }
+        }}
         settings={settings}
       />
       <ResizableMain

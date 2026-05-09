@@ -67,11 +67,52 @@ pub async fn set_overlay_mode(mode: String, app: AppHandle) -> Result<SettingsVi
             {
                 let _ = win.set_visible_on_all_workspaces(true);
             }
+            // Re-apply the persisted lock state every time we show, in case
+            // it was toggled while hidden.
+            let locked = settings::read_overlay_locked();
+            let _ = win.set_ignore_cursor_events(locked);
         }
     }
     use tauri::Emitter;
     let _ = app.emit("overlay:mode", json!({ "mode": mode }));
     settings::settings_view().map_err(|e| e.to_string())
+}
+
+/// Adjust the subtitle font size in pixels.
+#[tauri::command]
+pub async fn set_overlay_font_size(
+    size: u32,
+    app: AppHandle,
+) -> Result<SettingsView, String> {
+    settings::set_overlay_font_size(size).map_err(|e| e.to_string())?;
+    let view = settings::settings_view().map_err(|e| e.to_string())?;
+    use tauri::Emitter;
+    let _ = app.emit(
+        "overlay:settings",
+        json!({ "font_size": view.overlay_font_size, "locked": view.overlay_locked }),
+    );
+    Ok(view)
+}
+
+/// Lock / unlock the overlay. When locked the overlay is click-through —
+/// every click goes to whatever is behind it (Teams, browser, etc). When
+/// unlocked the user can grab and drag/resize it.
+#[tauri::command]
+pub async fn set_overlay_locked(
+    locked: bool,
+    app: AppHandle,
+) -> Result<SettingsView, String> {
+    settings::set_overlay_locked(locked).map_err(|e| e.to_string())?;
+    if let Some(win) = app.get_webview_window("overlay") {
+        let _ = win.set_ignore_cursor_events(locked);
+    }
+    let view = settings::settings_view().map_err(|e| e.to_string())?;
+    use tauri::Emitter;
+    let _ = app.emit(
+        "overlay:settings",
+        json!({ "font_size": view.overlay_font_size, "locked": view.overlay_locked }),
+    );
+    Ok(view)
 }
 
 // ------- meetings -------

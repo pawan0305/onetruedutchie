@@ -12,6 +12,8 @@ interface Props {
   onRenameMeeting: (title: string) => void;
   onToggleTranslate: (enabled: boolean) => void;
   onCycleOverlay: () => void;
+  onChangeOverlayFontSize: (delta: number) => void;
+  onToggleOverlayLocked: () => void;
 }
 
 export function TopBar({
@@ -25,6 +27,8 @@ export function TopBar({
   onRenameMeeting,
   onToggleTranslate,
   onCycleOverlay,
+  onChangeOverlayFontSize,
+  onToggleOverlayLocked,
 }: Props) {
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
 
@@ -94,6 +98,36 @@ export function TopBar({
               : "off"
           }
         </button>
+        {settings?.overlay_mode !== "off" && (
+          <>
+            <button
+              className="ghost"
+              onClick={() => onChangeOverlayFontSize(-2)}
+              title="Smaller subtitle text"
+            >
+              A−
+            </button>
+            <span className="pane-sub" style={{ minWidth: 22, textAlign: "center" }}>
+              {settings?.overlay_font_size ?? 24}
+            </span>
+            <button
+              className="ghost"
+              onClick={() => onChangeOverlayFontSize(2)}
+              title="Bigger subtitle text"
+            >
+              A+
+            </button>
+            <button
+              className="ghost"
+              onClick={onToggleOverlayLocked}
+              title={settings?.overlay_locked
+                ? "Locked (click-through). Click to unlock and drag/resize."
+                : "Unlocked. Click to lock and make click-through."}
+            >
+              {settings?.overlay_locked ? "🔒" : "🔓"}
+            </button>
+          </>
+        )}
         <button onClick={onOpenHistory}>History</button>
         {running ? (
           <button className="primary danger" onClick={onStop}>
