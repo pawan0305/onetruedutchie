@@ -12,6 +12,8 @@ export const api = {
     invoke<SettingsView>("set_api_keys", { deepgram, anthropic }),
   setTranslateEnabled: (enabled: boolean) =>
     invoke<SettingsView>("set_translate_enabled", { enabled }),
+  setOverlayMode: (mode: "off" | "dual" | "en") =>
+    invoke<SettingsView>("set_overlay_mode", { mode }),
   startMeeting: (title?: string) =>
     invoke<Meeting>("start_meeting", { title }),
   stopMeeting: () => invoke<Meeting>("stop_meeting"),

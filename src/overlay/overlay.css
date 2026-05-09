@@ -1,0 +1,78 @@
+html, body, #overlay-root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.overlay-shell {
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.62);
+  border-radius: 10px;
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  position: relative;
+  cursor: grab;
+}
+.overlay-shell:active { cursor: grabbing; }
+
+.overlay-lines {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.overlay-line {
+  font-size: 24px;
+  line-height: 1.25;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+}
+.overlay-line .row.nl {
+  color: #ffb380;
+  font-weight: 500;
+}
+.overlay-line .row.en {
+  color: #ffffff;
+}
+.overlay-line.pending {
+  opacity: 0.55;
+  font-style: italic;
+}
+.overlay-line.muted {
+  opacity: 0.45;
+  font-style: italic;
+}
+.muted { opacity: 0.55; font-style: italic; }
+
+.resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg,
+      transparent 0%, transparent 55%,
+      rgba(255, 255, 255, 0.6) 55%, rgba(255, 255, 255, 0.6) 65%,
+      transparent 65%, transparent 75%,
+      rgba(255, 255, 255, 0.6) 75%, rgba(255, 255, 255, 0.6) 85%,
+      transparent 85%);
+}

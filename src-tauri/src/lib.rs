@@ -55,12 +55,27 @@ pub fn run() {
 
             let state = AppState::new(app_handle, data_dir);
             app.manage(Arc::new(state));
+
+            // Apply persisted overlay mode. If the user had subtitles on
+            // when they last quit, show the overlay window now.
+            let mode = settings::read_overlay_mode();
+            if mode != "off" {
+                if let Some(win) = app.get_webview_window("overlay") {
+                    let _ = win.show();
+                    let _ = win.set_always_on_top(true);
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = win.set_visible_on_all_workspaces(true);
+                    }
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_api_keys,
             commands::set_translate_enabled,
+            commands::set_overlay_mode,
             commands::start_meeting,
             commands::stop_meeting,
             commands::current_meeting,

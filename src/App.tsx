@@ -277,6 +277,15 @@ export function App() {
             pushError(`translate toggle: ${err}`);
           }
         }}
+        onCycleOverlay={async () => {
+          const cur = settings?.overlay_mode ?? "off";
+          const next = cur === "off" ? "dual" : cur === "dual" ? "en" : "off";
+          try {
+            setSettings(await api.setOverlayMode(next));
+          } catch (err) {
+            pushError(`overlay: ${err}`);
+          }
+        }}
         settings={settings}
       />
       <ResizableMain

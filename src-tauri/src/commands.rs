@@ -6,7 +6,7 @@ use chrono::Utc;
 use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::json;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -46,6 +46,31 @@ pub async fn set_api_keys(
 #[tauri::command]
 pub async fn set_translate_enabled(enabled: bool) -> Result<SettingsView, String> {
     settings::set_translate_enabled(enabled).map_err(|e| e.to_string())?;
+    settings::settings_view().map_err(|e| e.to_string())
+}
+
+/// Show / hide / change the subtitle overlay window. Modes: "off", "dual",
+/// "en". Persists across restarts. The overlay webview listens to the
+/// `overlay:mode` event for live mode switching while it's already visible.
+#[tauri::command]
+pub async fn set_overlay_mode(mode: String, app: AppHandle) -> Result<SettingsView, String> {
+    settings::set_overlay_mode(&mode).map_err(|e| e.to_string())?;
+    if let Some(win) = app.get_webview_window("overlay") {
+        if mode == "off" {
+            let _ = win.hide();
+        } else {
+            let _ = win.show();
+            let _ = win.set_always_on_top(true);
+            // Visible on every macOS Space, so the subtitles follow you when
+            // you switch desktops. No-op on platforms that don't support it.
+            #[cfg(target_os = "macos")]
+            {
+                let _ = win.set_visible_on_all_workspaces(true);
+            }
+        }
+    }
+    use tauri::Emitter;
+    let _ = app.emit("overlay:mode", json!({ "mode": mode }));
     settings::settings_view().map_err(|e| e.to_string())
 }
 

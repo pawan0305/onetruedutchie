@@ -11,6 +11,7 @@ interface Props {
   onOpenHistory: () => void;
   onRenameMeeting: (title: string) => void;
   onToggleTranslate: (enabled: boolean) => void;
+  onCycleOverlay: () => void;
 }
 
 export function TopBar({
@@ -23,6 +24,7 @@ export function TopBar({
   onOpenHistory,
   onRenameMeeting,
   onToggleTranslate,
+  onCycleOverlay,
 }: Props) {
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
 
@@ -80,6 +82,17 @@ export function TopBar({
             : "Translation off — click to turn on"}
         >
           Translate: {settings?.translate ? "on" : "off"}
+        </button>
+        <button
+          className={`ghost ${settings?.overlay_mode === "off" ? "muted" : ""}`}
+          onClick={onCycleOverlay}
+          title="Subtitles overlay: click to cycle off → dual → EN-only"
+        >
+          Subtitles: {
+            settings?.overlay_mode === "dual" ? "NL+EN"
+              : settings?.overlay_mode === "en" ? "EN"
+              : "off"
+          }
         </button>
         <button onClick={onOpenHistory}>History</button>
         {running ? (

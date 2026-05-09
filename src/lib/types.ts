@@ -28,6 +28,7 @@ export interface SettingsView {
   deepgram_set: boolean;
   anthropic_set: boolean;
   translate: boolean;
+  overlay_mode: string; // "off" | "dual" | "en"
 }
 
 export interface MeetingSummaryRow {
