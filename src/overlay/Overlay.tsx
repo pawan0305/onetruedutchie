@@ -23,12 +23,14 @@ export function Overlay() {
   const [pending, setPending] = useState<Segment | null>(null);
   const [mode, setMode] = useState<string>("dual");
   const [fontSize, setFontSize] = useState<number>(24);
+  const [locked, setLocked] = useState<boolean>(true);
 
   useEffect(() => {
     invoke<Settings>("get_settings")
       .then((s) => {
         setMode(s.overlay_mode || "dual");
         if (s.overlay_font_size) setFontSize(s.overlay_font_size);
+        if (typeof s.overlay_locked === "boolean") setLocked(s.overlay_locked);
       })
       .catch(() => {});
 
@@ -57,6 +59,7 @@ export function Overlay() {
       listen<{ mode: string }>("overlay:mode", (e) => setMode(e.payload.mode)),
       listen<{ font_size: number; locked: boolean }>("overlay:settings", (e) => {
         if (e.payload.font_size) setFontSize(e.payload.font_size);
+        if (typeof e.payload.locked === "boolean") setLocked(e.payload.locked);
       }),
       listen<unknown>("meeting:started", () => {
         // Fresh meeting → clear stale subtitles.
@@ -78,26 +81,26 @@ export function Overlay() {
 
   return (
     <div
-      className="overlay-shell"
+      className={`overlay-shell${locked ? "" : " unlocked"}`}
       data-tauri-drag-region
       style={{ ["--overlay-font-size" as any]: `${fontSize}px` }}
     >
       <div className="overlay-lines" data-tauri-drag-region>
         {segments.length === 0 && !pending && (
           <div className="overlay-line muted" data-tauri-drag-region>
-            …waiting for speech…
+            <div className="line"><span className="hl muted">…waiting for speech…</span></div>
           </div>
         )}
         {segments.map((s) => (
           <div key={s.id} className="overlay-line" data-tauri-drag-region>
             {showNL && (
-              <div className="row nl" data-tauri-drag-region>
-                {s.dutch}
-              </div>
+              <div className="line"><span className="hl nl">{s.dutch}</span></div>
             )}
             {showEN && (
-              <div className="row en" data-tauri-drag-region>
-                {s.english ?? <span className="muted">translating…</span>}
+              <div className="line">
+                <span className="hl en">
+                  {s.english ?? <span className="muted">translating…</span>}
+                </span>
               </div>
             )}
           </div>
@@ -105,9 +108,7 @@ export function Overlay() {
         {pending && (
           <div className="overlay-line pending" data-tauri-drag-region>
             {showNL && (
-              <div className="row nl" data-tauri-drag-region>
-                {pending.dutch}
-              </div>
+              <div className="line"><span className="hl nl">{pending.dutch}</span></div>
             )}
           </div>
         )}

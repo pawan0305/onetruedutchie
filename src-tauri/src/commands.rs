@@ -601,13 +601,34 @@ async fn run_meeting(
     Ok(())
 }
 
-/// Holds the running interim for the current chunk. Each `is_final=true`
-/// from Deepgram closes a chunk and commits it as its own segment, so we
-/// don't accumulate stable text here — interim only.
+/// Stability window — once a piece of text has appeared in interims for at
+/// least this long, we anchor it. Anchored text never gets dropped from the
+/// segment, even if a later interim from Deepgram doesn't include it.
+const ANCHOR_STABILITY: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Min overlap (in bytes) between the anchored suffix and a diverging new
+/// interim's prefix to count as a continuation rather than a duplication.
+/// Tuned just over a typical short-word length so "we" or "de" alone won't
+/// glue unrelated sentences together.
+const MERGE_MIN_OVERLAP: usize = 6;
+
+/// One Deepgram chunk currently being transcribed.
+///
+/// As Interim events arrive we maintain `anchored` — the longest interim text
+/// that has been observed unchanged for at least ANCHOR_STABILITY. Anchored
+/// text is sticky: when Deepgram revises and produces a shorter or diverging
+/// interim, we keep `anchored` and merge in whatever new tail Deepgram
+/// produces (deduping any overlap with the anchored suffix). When `is_final`
+/// fires, we apply the same merge to its text and commit the result as the
+/// segment's dutch field.
 struct PendingSeg {
     id: Uuid,
     started_at: chrono::DateTime<Utc>,
-    interim: String,
+    /// Text that's been stable across multiple interims — never replaced.
+    anchored: String,
+    /// History of (observed_at, text) interims for recomputing anchored as
+    /// time passes. Bounded.
+    history: std::collections::VecDeque<(std::time::Instant, String)>,
 }
 
 impl PendingSeg {
@@ -615,8 +636,37 @@ impl PendingSeg {
         Self {
             id: Uuid::new_v4(),
             started_at: Utc::now(),
-            interim: String::new(),
+            anchored: String::new(),
+            history: std::collections::VecDeque::new(),
         }
+    }
+
+    /// Merge a new interim text into anchored state and return the display
+    /// text the user should currently see.
+    fn ingest_interim(&mut self, new_text: &str) -> String {
+        let now = std::time::Instant::now();
+        self.history.push_back((now, new_text.to_string()));
+        while self.history.len() > 32 {
+            self.history.pop_front();
+        }
+        // Anchored = longest interim text whose age >= ANCHOR_STABILITY.
+        // We never let anchored shrink.
+        let mut best: &str = self.anchored.as_str();
+        for (t, s) in &self.history {
+            if now.duration_since(*t) >= ANCHOR_STABILITY && s.len() > best.len() {
+                best = s.as_str();
+            }
+        }
+        if best.len() > self.anchored.len() {
+            self.anchored = best.to_string();
+        }
+        merge_with_anchor(&self.anchored, new_text)
+    }
+
+    /// Produce the final segment text using Deepgram's authoritative is_final
+    /// transcript merged with whatever we'd already anchored.
+    fn finalize(&self, final_text: &str) -> String {
+        merge_with_anchor(&self.anchored, final_text.trim())
     }
 
     fn to_segment(&self, dutch: String, is_final: bool) -> Segment {
@@ -628,6 +678,48 @@ impl PendingSeg {
             speaker: None,
             is_final,
         }
+    }
+}
+
+/// Combine anchored text with a new interim/final by detecting overlap at
+/// the seam, so we don't drop content but also don't duplicate it.
+///
+/// - If `anchored` is empty → just `new`.
+/// - If `new` is a prefix-extension of `anchored` (Deepgram added more
+///   words at the end) → use `new` (it's the longer cumulative text).
+/// - If `anchored` is a prefix-extension of `new` (Deepgram revised down) →
+///   keep `anchored` (sticky).
+/// - If they share a non-trivial overlap (suffix of anchored == prefix of
+///   new, ≥ MERGE_MIN_OVERLAP bytes) → splice them: anchored + new[overlap..].
+/// - Otherwise → concat with a space (anchored + " " + new). This is the
+///   case where Deepgram completely diverges; we preserve the anchored
+///   words rather than throwing them away.
+fn merge_with_anchor(anchored: &str, new: &str) -> String {
+    let a = anchored.trim_end();
+    let b = new.trim();
+    if a.is_empty() { return b.to_string(); }
+    if b.is_empty() { return a.to_string(); }
+    if b == a || b.starts_with(a) { return b.to_string(); }
+    if a.starts_with(b) { return a.to_string(); }
+
+    // Find longest suffix of `a` that is a prefix of `b`.
+    let max_check = a.len().min(b.len());
+    let mut overlap = 0;
+    let mut k = max_check;
+    while k >= MERGE_MIN_OVERLAP {
+        if a.is_char_boundary(a.len() - k) && b.is_char_boundary(k)
+            && a[a.len() - k..].eq_ignore_ascii_case(&b[..k])
+        {
+            overlap = k;
+            break;
+        }
+        k -= 1;
+    }
+
+    if overlap > 0 {
+        format!("{}{}", a, &b[overlap..])
+    } else {
+        format!("{} {}", a, b)
     }
 }
 
@@ -648,30 +740,26 @@ async fn handle_dg_event(
     match evt {
         DeepgramEvent::Interim { text, .. } => {
             let seg = pending.get_or_insert_with(PendingSeg::new);
-            seg.interim = text.clone();
-            state.emit("segment:pending", seg.to_segment(text, false));
+            let display = seg.ingest_interim(&text);
+            state.emit("segment:pending", seg.to_segment(display, false));
         }
         DeepgramEvent::Final { text, language, .. } => {
-            // Each is_final=true closes a chunk → commit as its own segment.
-            // This is what makes translation appear live — chunks fire every
-            // ~500ms of detected pause rather than waiting for speech_final.
-            let chunk = text.trim().to_string();
-            if chunk.is_empty() {
+            // Each is_final=true closes a chunk → commit as its own segment
+            // (live translation per chunk). The anchor merge ensures we
+            // don't drop content Deepgram revised away mid-chunk.
+            if text.trim().is_empty() {
                 if let Some(p) = pending.as_mut() {
-                    p.interim.clear();
+                    *p = PendingSeg::new();
                 }
                 return;
             }
-            // Take the existing pending (so its id/started_at carry into
-            // this finalized segment), or mint a new one.
             let p = pending.take().unwrap_or_else(PendingSeg::new);
-            let mut done = p.to_segment(chunk, true);
+            let dutch = p.finalize(&text);
+            if dutch.trim().is_empty() { return; }
+            let mut done = p.to_segment(dutch, true);
 
             let translate_on = settings::read_translate_enabled();
             if !translate_on || is_english(&language) {
-                // Translation disabled, or segment is already English —
-                // skip Claude. Mirror text into english so downstream
-                // (Copy EN, summary, chat) still has something coherent.
                 done.english = Some(done.dutch.clone());
                 {
                     let mut m = meeting.write();
@@ -686,13 +774,12 @@ async fn handle_dg_event(
                 state.emit("segment:upsert", done.clone());
                 spawn_translate(state.clone(), meeting.clone(), claude.clone(), done);
             }
-            // pending stays None; next Interim/Final mints a fresh segment.
         }
         DeepgramEvent::UtteranceEnd => {
-            // is_final commits everything, so usually there's nothing left.
-            // Safety net only.
+            // is_final commits chunks. Safety net for the case where the
+            // stream ended with text still in flight.
             if let Some(p) = pending.take() {
-                let dutch = p.interim.trim().to_string();
+                let dutch = p.anchored.trim().to_string();
                 if !dutch.is_empty() {
                     let done = p.to_segment(dutch, true);
                     {

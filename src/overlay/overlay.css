@@ -16,13 +16,13 @@ html, body, #overlay-root {
   -webkit-user-select: none;
 }
 
+/* Fully transparent shell — only the per-line highlights are visible. */
 .overlay-shell {
   --overlay-font-size: 24px;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.38);
-  border-radius: 10px;
-  padding: 14px 20px;
+  background: transparent;
+  padding: 6px 4px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -35,37 +35,37 @@ html, body, #overlay-root {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   height: 100%;
   overflow: hidden;
 }
 
 .overlay-line {
   font-size: var(--overlay-font-size);
-  line-height: 1.25;
-  /* Heavy text-shadow keeps the words legible over the more translucent
-     background (and over whatever's behind it when you crank up alpha). */
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.95),
-    0 0 6px rgba(0, 0, 0, 0.85);
+  line-height: 1.45;
+}
+.overlay-line.pending { opacity: 0.7; font-style: italic; }
+.overlay-line.muted  { opacity: 0.55; font-style: italic; }
+
+/* Each line gets its own block so NL+EN stack vertically. */
+.line { display: block; margin-bottom: 4px; }
+.line:last-child { margin-bottom: 0; }
+
+/* `display: inline` + box-decoration-break: clone gives multi-line text
+   a continuous rounded "marker" highlight that hugs each visual line —
+   the YouTube / movie-subtitle look. */
+.hl {
+  display: inline;
+  background: rgba(0, 0, 0, 0.78);
+  padding: 3px 9px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  border-radius: 4px;
   font-weight: 500;
 }
-.overlay-line .row.nl {
-  color: #ffb380;
-  font-weight: 500;
-}
-.overlay-line .row.en {
-  color: #ffffff;
-}
-.overlay-line.pending {
-  opacity: 0.55;
-  font-style: italic;
-}
-.overlay-line.muted {
-  opacity: 0.45;
-  font-style: italic;
-}
-.muted { opacity: 0.55; font-style: italic; }
+.hl.nl { color: #ffb380; }
+.hl.en { color: #ffffff; }
+.hl.muted { color: rgba(255, 255, 255, 0.65); background: rgba(0, 0, 0, 0.55); }
 
 .resize-handle {
   position: absolute;
@@ -81,4 +81,16 @@ html, body, #overlay-root {
       transparent 65%, transparent 75%,
       rgba(255, 255, 255, 0.6) 75%, rgba(255, 255, 255, 0.6) 85%,
       transparent 85%);
+  /* Hide the resize grip when the overlay is locked (click-through):
+     the user can't grab it anyway, and seeing the artifact through Teams
+     is ugly. The .unlocked class is added by JS via the lock state. */
+}
+.overlay-shell:not(.unlocked) .resize-handle { display: none; }
+
+/* When unlocked: faint dashed outline so the user can find where to grab
+   even though the rest of the shell is transparent. */
+.overlay-shell.unlocked {
+  outline: 1px dashed rgba(255, 255, 255, 0.25);
+  outline-offset: -1px;
+  border-radius: 4px;
 }
