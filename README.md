@@ -2,7 +2,7 @@
 
 **Real-time meeting transcription, translation, and AI assistant for macOS.**
 
-[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.1.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.1.0/OneTrueDutchie_0.1.0_aarch64.dmg)
+[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.2.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.2.0/OneTrueDutchie_0.2.0_aarch64.dmg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey?style=for-the-badge)](#prerequisites)
 
@@ -27,7 +27,7 @@ language Claude can write. The name stuck.
 
 **Download (Apple Silicon Macs):**
 
-→ **[OneTrueDutchie_0.1.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.1.0/OneTrueDutchie_0.1.0_aarch64.dmg)** (5.4 MB · macOS 13+ · M1/M2/M3/M4)
+→ **[OneTrueDutchie_0.2.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.2.0/OneTrueDutchie_0.2.0_aarch64.dmg)** (~5.4 MB · macOS 13+ · M1/M2/M3/M4)
 
 Double-click the .dmg to mount it, drag OneTrueDutchie into `/Applications`.
 
@@ -63,14 +63,22 @@ On first launch:
 
 ## API keys
 
-| Provider | Where | Cost per hour of meeting |
-|----------|-------|--------------------------|
-| **Deepgram** Nova-3 (multi-language streaming STT) | [console.deepgram.com](https://console.deepgram.com/) — $200 free trial | ≈$0.26 |
-| **Anthropic** Claude Haiku 4.5 (translation, summary, chat) | [console.anthropic.com](https://console.anthropic.com/) | ≈$0.07 |
+You need **Deepgram** for transcription. For the LLM (translation,
+summary, chat), pick one:
 
-Roughly **$0.35 per hour** of meeting with light chat. Keys are stored in
-`~/Library/Application Support/com.onetruedutchie.app/keys.json` (chmod 600)
-and never leave your machine.
+| Component | Provider | Where | Cost per hour |
+|-----------|----------|-------|---------------|
+| **STT** (required) | Deepgram Nova-3 multi | [console.deepgram.com](https://console.deepgram.com/) — $200 free trial | ≈$0.26 |
+| **LLM** option A | Anthropic Claude Haiku 4.5 | [console.anthropic.com](https://console.anthropic.com/) | ≈$0.07 |
+| **LLM** option B | OpenAI gpt-4o-mini | [platform.openai.com](https://platform.openai.com/) | ≈$0.05 |
+| **LLM** option C | Local model via Ollama / LM Studio / vLLM | localhost | **free** |
+
+Settings → **LLM backend** lets you switch between Anthropic and any
+OpenAI-compatible endpoint at any time. Local-model setups have
+**zero LLM cost** — your only spend is Deepgram (~€0.30/hr).
+
+Keys are stored in `~/Library/Application Support/com.onetruedutchie.app/keys.json`
+(chmod 600) and never leave your machine.
 
 ---
 

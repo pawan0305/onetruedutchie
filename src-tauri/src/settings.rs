@@ -42,6 +42,25 @@ pub struct ApiKeys {
     /// straight into the prompts. Default "English".
     #[serde(default = "default_target_language")]
     pub target_language: String,
+    /// Which LLM backend to use for translation / summary / chat.
+    /// "anthropic" (default) uses api.anthropic.com with the configured
+    /// anthropic key. "openai" uses any OpenAI-compatible endpoint —
+    /// covers OpenAI itself, Ollama (localhost:11434/v1), LM Studio
+    /// (localhost:1234/v1), llama.cpp's server, vLLM, OpenRouter, etc.
+    #[serde(default = "default_llm_provider")]
+    pub llm_provider: String,
+    /// API key for the OpenAI-compatible endpoint. May be empty for a
+    /// local model that doesn't enforce auth.
+    #[serde(default)]
+    pub openai_api_key: Option<String>,
+    /// Base URL for the OpenAI-compatible endpoint. Empty = default
+    /// "https://api.openai.com/v1". For Ollama set "http://localhost:11434/v1".
+    #[serde(default)]
+    pub openai_base_url: String,
+    /// Model identifier for the OpenAI-compatible endpoint. Empty = a
+    /// sensible default ("gpt-4o-mini"). For Ollama use e.g. "llama3.1:8b".
+    #[serde(default)]
+    pub openai_model: String,
 }
 
 impl Default for ApiKeys {
@@ -59,6 +78,10 @@ impl Default for ApiKeys {
             overlay_w: None,
             overlay_h: None,
             target_language: default_target_language(),
+            llm_provider: default_llm_provider(),
+            openai_api_key: None,
+            openai_base_url: String::new(),
+            openai_model: String::new(),
         }
     }
 }
@@ -68,6 +91,7 @@ fn default_overlay() -> String { "off".to_string() }
 fn default_overlay_size() -> u32 { 24 }
 fn default_overlay_locked() -> bool { true }
 fn default_target_language() -> String { "English".to_string() }
+fn default_llm_provider() -> String { "anthropic".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsView {
@@ -79,6 +103,10 @@ pub struct SettingsView {
     pub overlay_locked: bool,
     pub keywords: Vec<String>,
     pub target_language: String,
+    pub llm_provider: String,
+    pub openai_set: bool,
+    pub openai_base_url: String,
+    pub openai_model: String,
 }
 
 /// ~/Library/Application Support/com.onetruedutchie.app/keys.json
@@ -109,7 +137,66 @@ pub fn settings_view() -> Result<SettingsView> {
         overlay_locked: keys.overlay_locked,
         keywords: keys.keywords.clone(),
         target_language: keys.target_language.clone(),
+        llm_provider: keys.llm_provider.clone(),
+        openai_set: keys
+            .openai_api_key
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
+        openai_base_url: keys.openai_base_url.clone(),
+        openai_model: keys.openai_model.clone(),
     })
+}
+
+pub fn read_llm_provider() -> String {
+    read_keys()
+        .map(|k| k.llm_provider)
+        .unwrap_or_else(|_| "anthropic".into())
+}
+
+pub fn read_openai_config() -> (String, String, String) {
+    let k = read_keys().unwrap_or_default();
+    (
+        k.openai_api_key.unwrap_or_default(),
+        if k.openai_base_url.is_empty() {
+            "https://api.openai.com/v1".to_string()
+        } else {
+            k.openai_base_url
+        },
+        if k.openai_model.is_empty() {
+            "gpt-4o-mini".to_string()
+        } else {
+            k.openai_model
+        },
+    )
+}
+
+pub fn set_llm_provider(provider: &str) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    let normalized = match provider {
+        "openai" | "OpenAI" | "openai-compatible" => "openai".to_string(),
+        _ => "anthropic".to_string(),
+    };
+    keys.llm_provider = normalized;
+    write_keys_back(&keys)
+}
+
+pub fn set_openai_config(
+    api_key: Option<&str>,
+    base_url: Option<&str>,
+    model: Option<&str>,
+) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    if let Some(k) = api_key {
+        keys.openai_api_key = if k.is_empty() { None } else { Some(k.to_string()) };
+    }
+    if let Some(u) = base_url {
+        keys.openai_base_url = u.trim_end_matches('/').to_string();
+    }
+    if let Some(m) = model {
+        keys.openai_model = m.to_string();
+    }
+    write_keys_back(&keys)
 }
 
 pub fn read_target_language() -> String {
@@ -255,4 +342,28 @@ pub fn require_anthropic() -> Result<String> {
         .anthropic
         .filter(|s| !s.is_empty())
         .context("Anthropic API key not set. Open Settings and add it.")
+}
+
+/// Returns whatever credential the orchestrator needs to hand the LLM
+/// client. For Anthropic mode that's the Anthropic key. For OpenAI mode
+/// the key is read separately inside `LlmClient::from_settings`, so we
+/// just return an empty string here — but we still validate that the
+/// OpenAI side is at least minimally configured (model + base URL have
+/// defaults, but a fully blank key on api.openai.com would 401, so we
+/// error early when the base URL is api.openai.com and the key is
+/// missing). Local endpoints may legitimately have no API key.
+pub fn require_llm_credentials() -> Result<String> {
+    match read_llm_provider().as_str() {
+        "openai" => {
+            let (key, base, _model) = read_openai_config();
+            let is_openai_dot_com = base.starts_with("https://api.openai.com");
+            if is_openai_dot_com && key.is_empty() {
+                anyhow::bail!(
+                    "OpenAI API key not set. Open Settings and add it, or point the base URL at a local model that doesn't need one.",
+                );
+            }
+            Ok(String::new())
+        }
+        _ => require_anthropic(),
+    }
 }

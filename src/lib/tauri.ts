@@ -25,6 +25,18 @@ export const api = {
     invoke<SettingsView>("set_vocab", { words }),
   setTargetLanguage: (language: string) =>
     invoke<SettingsView>("set_target_language", { language }),
+  setLlmProvider: (provider: "anthropic" | "openai") =>
+    invoke<SettingsView>("set_llm_provider", { provider }),
+  setOpenAIConfig: (cfg: {
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+  }) =>
+    invoke<SettingsView>("set_openai_config", {
+      apiKey: cfg.apiKey,
+      baseUrl: cfg.baseUrl,
+      model: cfg.model,
+    }),
   saveOverlayGeometry: (x: number, y: number, w: number, h: number) =>
     invoke<void>("save_overlay_geometry", { x, y, w, h }),
   setMeetingNotes: (id: string | undefined, notes: string) =>

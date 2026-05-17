@@ -11,7 +11,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::anthropic::{AnthropicClient, ChatStreamEvent};
+use crate::anthropic::ChatStreamEvent;
+use crate::llm::LlmClient;
 use crate::audio;
 use crate::deepgram::{self, DeepgramConfig, DeepgramEvent};
 use crate::settings::{self, SettingsView};
@@ -82,6 +83,32 @@ pub async fn set_overlay_mode(mode: String, app: AppHandle) -> Result<SettingsVi
 #[tauri::command]
 pub async fn set_vocab(words: Vec<String>) -> Result<SettingsView, String> {
     settings::set_keywords(words).map_err(|e| e.to_string())?;
+    settings::settings_view().map_err(|e| e.to_string())
+}
+
+/// Pick the LLM backend. "anthropic" or "openai" — the latter routes
+/// translation, summary, and chat through any OpenAI-compatible endpoint
+/// (OpenAI itself, Ollama, LM Studio, vLLM, OpenRouter, etc.).
+#[tauri::command]
+pub async fn set_llm_provider(provider: String) -> Result<SettingsView, String> {
+    settings::set_llm_provider(&provider).map_err(|e| e.to_string())?;
+    settings::settings_view().map_err(|e| e.to_string())
+}
+
+/// Persist the OpenAI-compatible endpoint config. Any field passed as
+/// `None` is left untouched. Empty string for `api_key` clears the key.
+#[tauri::command]
+pub async fn set_openai_config(
+    api_key: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+) -> Result<SettingsView, String> {
+    settings::set_openai_config(
+        api_key.as_deref(),
+        base_url.as_deref(),
+        model.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
     settings::settings_view().map_err(|e| e.to_string())
 }
 
@@ -269,7 +296,7 @@ pub async fn start_meeting(
         return Err("a meeting is already running".into());
     }
     let dg_key = settings::require_deepgram().map_err(|e| e.to_string())?;
-    let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
+    let an_key = settings::require_llm_credentials().map_err(|e| e.to_string())?;
 
     let title = title.unwrap_or_else(|| default_title());
     let meeting = Meeting::new(title);
@@ -411,8 +438,8 @@ pub async fn export_english_transcript(
     id: Option<Uuid>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<String, String> {
-    let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
-    let claude = AnthropicClient::new(an_key, settings::read_target_language());
+    let an_key = settings::require_llm_credentials().map_err(|e| e.to_string())?;
+    let claude = LlmClient::from_settings(an_key, settings::read_target_language());
 
     let transcript = if let Some(meeting_id) = id {
         // Prefer the live meeting if the id matches; otherwise load from disk.
@@ -574,8 +601,8 @@ pub async fn regenerate_summary(
     id: Option<Uuid>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
-    let claude = AnthropicClient::new(an_key, settings::read_target_language());
+    let an_key = settings::require_llm_credentials().map_err(|e| e.to_string())?;
+    let claude = LlmClient::from_settings(an_key, settings::read_target_language());
     let app_state = state.inner().clone();
 
     // Decide which meeting we're summarizing: the live one if `id` matches
@@ -693,7 +720,7 @@ pub async fn ask_question(
     if question.trim().is_empty() {
         return Err("empty question".into());
     }
-    let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
+    let an_key = settings::require_llm_credentials().map_err(|e| e.to_string())?;
 
     // Pick the meeting: an explicitly-supplied id wins (so the user can ask
     // questions of a saved meeting while a different one is being recorded),
@@ -717,7 +744,7 @@ pub async fn ask_question(
 
     let stream_id = Uuid::new_v4();
     let app_state = state.inner().clone();
-    let claude = AnthropicClient::new(an_key, settings::read_target_language());
+    let claude = LlmClient::from_settings(an_key, settings::read_target_language());
 
     // Snapshot transcript & history for the request. Source-language only —
     // Claude reads Dutch fine, and feeding the choppy per-chunk translations
@@ -916,7 +943,7 @@ async fn run_meeting(
     // Need a Clone of DeepgramConfig so the loop can clone per attempt.
     // (Clone derived below in the type; nothing to do here.)
 
-    let claude = Arc::new(AnthropicClient::new(an_key, settings::read_target_language()));
+    let claude = Arc::new(LlmClient::from_settings(an_key, settings::read_target_language()));
 
     let mut pending: Option<PendingSeg> = None;
     // Summaries are user-triggered only (regenerate_summary command). No
@@ -1101,7 +1128,7 @@ async fn handle_dg_event(
     pending: &mut Option<PendingSeg>,
     state: &Arc<AppState>,
     meeting: &Arc<RwLock<Meeting>>,
-    claude: &Arc<AnthropicClient>,
+    claude: &Arc<LlmClient>,
 ) {
     match evt {
         DeepgramEvent::Stats { bytes_since_last } => {
@@ -1200,7 +1227,7 @@ async fn handle_dg_event(
 fn spawn_translate(
     state: Arc<AppState>,
     meeting: Arc<RwLock<Meeting>>,
-    claude: Arc<AnthropicClient>,
+    claude: Arc<LlmClient>,
     seg: Segment,
 ) {
     tokio::spawn(async move {

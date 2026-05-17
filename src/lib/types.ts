@@ -45,6 +45,10 @@ export interface SettingsView {
   overlay_locked: boolean;
   keywords: string[];
   target_language: string;
+  llm_provider: string; // "anthropic" | "openai"
+  openai_set: boolean;
+  openai_base_url: string;
+  openai_model: string;
 }
 
 export interface MeetingSummaryRow {

@@ -2,6 +2,8 @@ mod anthropic;
 mod audio;
 mod commands;
 mod deepgram;
+mod llm;
+mod openai;
 mod settings;
 mod state;
 mod storage;
@@ -91,6 +93,8 @@ pub fn run() {
             commands::set_overlay_locked,
             commands::set_vocab,
             commands::set_target_language,
+            commands::set_llm_provider,
+            commands::set_openai_config,
             commands::save_overlay_geometry,
             commands::set_meeting_notes,
             commands::set_meeting_tags,

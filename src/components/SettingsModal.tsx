@@ -52,6 +52,47 @@ export function SettingsModal({ settings, onSave, onSettingsChanged, onClose, on
   );
   const [savingLang, setSavingLang] = useState(false);
 
+  // LLM backend. "anthropic" or "openai" (= any OpenAI-compatible endpoint
+  // — OpenAI itself, Ollama, LM Studio, vLLM, OpenRouter, etc.).
+  const [llmProvider, setLlmProvider] = useState<string>(
+    settings?.llm_provider || "anthropic",
+  );
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [openaiBase, setOpenaiBase] = useState<string>(
+    settings?.openai_base_url || "",
+  );
+  const [openaiModel, setOpenaiModel] = useState<string>(
+    settings?.openai_model || "",
+  );
+  const [savingOpenai, setSavingOpenai] = useState(false);
+
+  const saveLlmProvider = async (next: "anthropic" | "openai") => {
+    setLlmProvider(next);
+    try {
+      const s = await api.setLlmProvider(next);
+      onSettingsChanged(s);
+    } catch (err) {
+      onError(`llm provider: ${err}`);
+    }
+  };
+
+  const saveOpenai = async () => {
+    setSavingOpenai(true);
+    try {
+      const s = await api.setOpenAIConfig({
+        apiKey: openaiKey || undefined, // undefined = leave existing untouched
+        baseUrl: openaiBase,
+        model: openaiModel,
+      });
+      onSettingsChanged(s);
+      setOpenaiKey(""); // clear the password field after save
+    } catch (err) {
+      onError(`openai config: ${err}`);
+    } finally {
+      setSavingOpenai(false);
+    }
+  };
+
   const submit = async () => {
     setSaving(true);
     try {
@@ -150,6 +191,76 @@ export function SettingsModal({ settings, onSave, onSettingsChanged, onClose, on
             · Claude Haiku 4.5 ($1/MTok in, $5/MTok out)
           </small>
         </label>
+
+        <label>
+          <span>
+            LLM backend
+            <em className="muted"> (for translation, summary, chat)</em>
+          </span>
+          <select
+            value={llmProvider}
+            onChange={(e) =>
+              saveLlmProvider(e.target.value as "anthropic" | "openai")
+            }
+          >
+            <option value="anthropic">Anthropic (Claude Haiku 4.5)</option>
+            <option value="openai">OpenAI-compatible (OpenAI, Ollama, LM Studio…)</option>
+          </select>
+          <small>
+            Anthropic = cloud, prompt caching, ~$0.07/hr of meeting.
+            OpenAI-compatible = bring your own — point at OpenAI, or a
+            local model on localhost for $0 LLM cost.
+          </small>
+        </label>
+
+        {llmProvider === "openai" && (
+          <label>
+            <span>
+              OpenAI-compatible endpoint
+              {settings?.openai_set && (
+                <em className="muted"> (key currently set, leave blank to keep)</em>
+              )}
+            </span>
+            <input
+              type="text"
+              value={openaiBase}
+              onChange={(e) => setOpenaiBase(e.target.value)}
+              placeholder="https://api.openai.com/v1  ·  http://localhost:11434/v1 (Ollama)"
+              autoComplete="off"
+            />
+            <input
+              type="text"
+              value={openaiModel}
+              onChange={(e) => setOpenaiModel(e.target.value)}
+              placeholder="gpt-4o-mini  ·  llama3.1:8b  ·  qwen2.5:14b"
+              autoComplete="off"
+              style={{ marginTop: 6 }}
+            />
+            <input
+              type="password"
+              value={openaiKey}
+              onChange={(e) => setOpenaiKey(e.target.value)}
+              placeholder="API key (leave blank for a local model without auth)"
+              autoComplete="off"
+              style={{ marginTop: 6 }}
+            />
+            <small>
+              For Ollama: base = <code>http://localhost:11434/v1</code>,
+              model = whatever you have pulled, key blank.
+              For OpenAI: base = <code>https://api.openai.com/v1</code>,
+              model = <code>gpt-4o-mini</code>, key from{" "}
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
+                platform.openai.com
+              </a>
+              .
+            </small>
+            <div style={{ marginTop: 6 }}>
+              <button className="ghost" onClick={saveOpenai} disabled={savingOpenai}>
+                {savingOpenai ? "Saving…" : "Save endpoint"}
+              </button>
+            </div>
+          </label>
+        )}
 
         <label>
           <span>
