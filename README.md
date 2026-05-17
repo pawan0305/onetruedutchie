@@ -21,6 +21,19 @@ language Claude can write. The name stuck.
 
 ## Quick start
 
+**Download (Apple Silicon Macs):**
+Grab the latest `OneTrueDutchie_x.y.z_aarch64.dmg` from the
+[Releases page](https://github.com/pawan0305/onetruedutchie/releases),
+double-click to mount, drag OneTrueDutchie into `/Applications`.
+
+Because the .dmg is ad-hoc-signed (not Apple-notarized — notarization
+costs $99/yr in the Apple Developer Program), macOS Gatekeeper will
+refuse to open it on first launch. Right-click the app in Applications
+and choose **Open**, then confirm. After this first launch it opens
+normally.
+
+**Build from source:**
+
 ```bash
 git clone https://github.com/pawan0305/onetruedutchie.git
 cd onetruedutchie
@@ -31,7 +44,7 @@ That single script installs everything (Rust, npm deps, builds the Swift
 sidecar, signs the .app with a stable local cert so macOS TCC permissions
 stick), and drops `OneTrueDutchie.app` into `/Applications`.
 
-Launch it from Spotlight or `open /Applications/OneTrueDutchie.app`.
+Launch from Spotlight or `open /Applications/OneTrueDutchie.app`.
 
 On first launch:
 
