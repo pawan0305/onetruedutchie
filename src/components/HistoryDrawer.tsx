@@ -83,7 +83,7 @@ export function HistoryDrawer({
           />
         </div>
         <div className="drawer-hint">
-          Drag one meeting onto another to combine them.
+          Grab ⋮⋮ and drop onto another meeting to combine them.
         </div>
         {visible.length === 0 && (
           <div className="empty">
@@ -100,20 +100,10 @@ export function HistoryDrawer({
             return (
               <li
                 key={r.id}
-                draggable={!renaming && !editingTags}
                 className={
                   (isDragging ? "history-dragging" : "") +
                   (isDropTarget ? " history-drop-target" : "")
                 }
-                onDragStart={(e) => {
-                  e.dataTransfer.setData("text/x-meeting-id", r.id);
-                  e.dataTransfer.effectAllowed = "move";
-                  setDraggingId(r.id);
-                }}
-                onDragEnd={() => {
-                  setDraggingId(null);
-                  setDropTargetId(null);
-                }}
                 onDragOver={(e) => {
                   if (!draggingId || draggingId === r.id) return;
                   e.preventDefault();
@@ -141,6 +131,26 @@ export function HistoryDrawer({
                   onMerge(src, r.id);
                 }}
               >
+                <span
+                  className="drag-handle"
+                  draggable={!renaming && !editingTags}
+                  title="Drag onto another meeting to combine"
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/x-meeting-id", r.id);
+                    e.dataTransfer.effectAllowed = "move";
+                    // Drag image = the whole <li>, so the user sees the full row floating.
+                    const li = (e.currentTarget as HTMLElement).closest("li");
+                    if (li) e.dataTransfer.setDragImage(li, 0, 0);
+                    setDraggingId(r.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingId(null);
+                    setDropTargetId(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ⋮⋮
+                </span>
                 {renaming ? (
                   <input
                     className="title-input history-rename"
