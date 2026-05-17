@@ -7,6 +7,7 @@ interface Props {
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
+  onMerge: (source: string, target: string) => void;
   onClose: () => void;
   onRefresh: () => void;
   onError?: (msg: string) => void;
@@ -17,6 +18,7 @@ export function HistoryDrawer({
   onOpen,
   onDelete,
   onRename,
+  onMerge,
   onClose,
   onRefresh,
   onError,
@@ -27,6 +29,8 @@ export function HistoryDrawer({
   const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
   const [tagsDraft, setTagsDraft] = useState("");
   const [query, setQuery] = useState("");
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     onRefresh();
@@ -78,6 +82,9 @@ export function HistoryDrawer({
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
+        <div className="drawer-hint">
+          Drag one meeting onto another to combine them.
+        </div>
         {visible.length === 0 && (
           <div className="empty">
             {rows.length === 0 ? "No saved meetings yet." : "No matches."}
@@ -88,8 +95,52 @@ export function HistoryDrawer({
             const armed = armedDeleteId === r.id;
             const renaming = renamingId === r.id;
             const editingTags = editingTagsId === r.id;
+            const isDragging = draggingId === r.id;
+            const isDropTarget = dropTargetId === r.id && draggingId && draggingId !== r.id;
             return (
-              <li key={r.id}>
+              <li
+                key={r.id}
+                draggable={!renaming && !editingTags}
+                className={
+                  (isDragging ? "history-dragging" : "") +
+                  (isDropTarget ? " history-drop-target" : "")
+                }
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/x-meeting-id", r.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  setDraggingId(r.id);
+                }}
+                onDragEnd={() => {
+                  setDraggingId(null);
+                  setDropTargetId(null);
+                }}
+                onDragOver={(e) => {
+                  if (!draggingId || draggingId === r.id) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dropTargetId !== r.id) setDropTargetId(r.id);
+                }}
+                onDragLeave={(e) => {
+                  // Only clear when leaving the <li> itself, not a child.
+                  const rt = e.relatedTarget as Node | null;
+                  if (rt && (e.currentTarget as Node).contains(rt)) return;
+                  if (dropTargetId === r.id) setDropTargetId(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const src = e.dataTransfer.getData("text/x-meeting-id");
+                  setDraggingId(null);
+                  setDropTargetId(null);
+                  if (!src || src === r.id) return;
+                  const srcRow = rows.find((x) => x.id === src);
+                  const srcTitle = srcRow?.title ?? "that meeting";
+                  const ok = window.confirm(
+                    `Merge "${srcTitle}" into "${r.title}"?\n\nSegments, chat, notes, and tags from "${srcTitle}" will be combined into "${r.title}", and "${srcTitle}" will be deleted. The combined summary will be cleared so you can regenerate it.`,
+                  );
+                  if (!ok) return;
+                  onMerge(src, r.id);
+                }}
+              >
                 {renaming ? (
                   <input
                     className="title-input history-rename"

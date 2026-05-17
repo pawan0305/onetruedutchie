@@ -442,6 +442,28 @@ export function App() {
               pushError(`rename: ${err}`);
             }
           }}
+          onMerge={async (source, target) => {
+            try {
+              await api.mergeMeetings(source, target);
+              setHistory(await api.listMeetings());
+              // If the user is currently viewing one of the merged meetings,
+              // refresh the open view: reload the survivor (target), or clear
+              // it if they were viewing the now-deleted source.
+              if (meeting) {
+                if (meeting.id === source) {
+                  setMeeting(null);
+                } else if (meeting.id === target) {
+                  try {
+                    setMeeting(await api.loadMeeting(target));
+                  } catch (err) {
+                    pushError(`reload: ${err}`);
+                  }
+                }
+              }
+            } catch (err) {
+              pushError(`merge: ${err}`);
+            }
+          }}
           onError={pushError}
         />
       )}

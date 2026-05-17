@@ -432,6 +432,92 @@ pub async fn rename_meeting(
     .map_err(|e| e.to_string())
 }
 
+/// Merge `source` into `target`: segments and chat are concatenated and
+/// re-sorted by timestamp, notes are appended, tags are unioned, speaker
+/// names are merged (target wins on conflict), and cost fields are summed.
+/// The source meeting is deleted after a successful save. Neither side may
+/// be the currently-running meeting — stop it first.
+#[tauri::command]
+pub async fn merge_meetings(
+    source: Uuid,
+    target: Uuid,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    if source == target {
+        return Err("cannot merge a meeting into itself".into());
+    }
+    if let Some(handle) = state.current() {
+        let live = handle.meeting.read().id;
+        if live == source || live == target {
+            return Err("stop the active meeting before merging".into());
+        }
+    }
+    let dir = state.meetings_dir();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let src = storage::load_meeting(&dir, source)?;
+        let mut tgt = storage::load_meeting(&dir, target)?;
+
+        // started_at: earliest of the two; ended_at: latest of the two.
+        if src.started_at < tgt.started_at {
+            tgt.started_at = src.started_at;
+        }
+        tgt.ended_at = match (tgt.ended_at, src.ended_at) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+
+        // Segments: append + sort by started_at so combined transcript reads
+        // chronologically even if the two recordings overlapped in time.
+        tgt.segments.extend(src.segments.into_iter());
+        tgt.segments.sort_by(|a, b| a.started_at.cmp(&b.started_at));
+
+        // Chat: append + sort by timestamp.
+        tgt.chat.extend(src.chat.into_iter());
+        tgt.chat.sort_by(|a, b| a.at.cmp(&b.at));
+
+        // Notes: concatenate with a separator if both are non-empty.
+        if !src.notes.trim().is_empty() {
+            if tgt.notes.trim().is_empty() {
+                tgt.notes = src.notes;
+            } else {
+                tgt.notes.push_str("\n\n---\n\n");
+                tgt.notes.push_str(&src.notes);
+            }
+        }
+
+        // Tags: union, preserving target's order, then appending new ones.
+        for t in src.tags {
+            if !tgt.tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
+                tgt.tags.push(t);
+            }
+        }
+
+        // Speaker names: target wins on conflict.
+        for (k, v) in src.speaker_names {
+            tgt.speaker_names.entry(k).or_insert(v);
+        }
+
+        // Cost: sum.
+        tgt.cost.deepgram_audio_secs += src.cost.deepgram_audio_secs;
+        tgt.cost.anthropic_input_tokens += src.cost.anthropic_input_tokens;
+        tgt.cost.anthropic_output_tokens += src.cost.anthropic_output_tokens;
+        tgt.cost.anthropic_cache_read_tokens += src.cost.anthropic_cache_read_tokens;
+
+        // Summary is now stale; clear so the user knows to regenerate.
+        tgt.summary = None;
+        tgt.summary_updated_at = None;
+
+        storage::save_meeting(&dir, &tgt)?;
+        storage::delete_meeting(&dir, source)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn regenerate_summary(
     id: Option<Uuid>,

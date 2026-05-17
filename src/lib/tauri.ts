@@ -42,6 +42,8 @@ export const api = {
   deleteMeeting: (id: string) => invoke<void>("delete_meeting", { id }),
   renameMeeting: (id: string, title: string) =>
     invoke<void>("rename_meeting", { id, title }),
+  mergeMeetings: (source: string, target: string) =>
+    invoke<void>("merge_meetings", { source, target }),
   exportEnglishTranscript: (id?: string) =>
     invoke<string>("export_english_transcript", { id }),
   regenerateSummary: (id?: string) => invoke<void>("regenerate_summary", { id }),

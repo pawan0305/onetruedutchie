@@ -101,6 +101,7 @@ pub fn run() {
             commands::load_meeting,
             commands::delete_meeting,
             commands::rename_meeting,
+            commands::merge_meetings,
             commands::export_english_transcript,
             commands::ask_question,
             commands::regenerate_summary,
