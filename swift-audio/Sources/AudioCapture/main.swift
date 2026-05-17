@@ -20,6 +20,11 @@ import CoreMedia
 @inline(__always) func errLine(_ s: String) {
     FileHandle.standardError.write(("ERR " + s + "\n").data(using: .utf8) ?? Data())
 }
+/// Structured metadata for the parent process — no prefix so Rust can
+/// pattern-match the line directly. Used for the audio VU meter etc.
+@inline(__always) func metaLine(_ s: String) {
+    FileHandle.standardError.write((s + "\n").data(using: .utf8) ?? Data())
+}
 
 // ---------- config ----------
 let captureMic = !CommandLine.arguments.contains("--no-mic")
@@ -164,7 +169,7 @@ final class Sink {
             let sysRms = rms(sys, count: sysCount)
             // Compact JSON on stderr with a known prefix; Rust grep
             // recognises the prefix and converts to an audio:level event.
-            errLine("META:level mic=\(String(format: "%.4f", micRms)) sys=\(String(format: "%.4f", sysRms))")
+            metaLine("META:level mic=\(String(format: "%.4f", micRms)) sys=\(String(format: "%.4f", sysRms))")
         }
 
         if shouldLog {

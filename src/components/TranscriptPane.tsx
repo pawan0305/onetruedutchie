@@ -66,6 +66,19 @@ export function TranscriptPane({
   const [editingSpeaker, setEditingSpeaker] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
 
+  // Only show speaker labels when the meeting actually has more than one
+  // distinct speaker — otherwise it's just noise for solo recordings.
+  const showSpeakers = (() => {
+    const seen = new Set<number>();
+    for (const s of segments) {
+      if (s.is_final && s.speaker_id != null) {
+        seen.add(s.speaker_id);
+        if (seen.size > 1) return true;
+      }
+    }
+    return false;
+  })();
+
   const commitSpeakerName = async (sid: number) => {
     setEditingSpeaker(null);
     try {
@@ -148,6 +161,7 @@ export function TranscriptPane({
             <div className={`segment-cols${showEnglish ? "" : " single"}`}>
               <div className="col nl">
                 {(() => {
+                  if (!showSpeakers) return null;
                   const sid = s.speaker_id ?? null;
                   const label = speakerLabel(sid, speakerNames);
                   if (label == null) return null;
