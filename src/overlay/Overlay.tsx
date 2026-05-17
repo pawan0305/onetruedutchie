@@ -111,12 +111,79 @@ export function Overlay() {
   const showNL = mode === "dual";
   const showEN = mode === "dual" || mode === "en";
 
+  const cycleMode = async () => {
+    const next = mode === "off" ? "dual" : mode === "dual" ? "en" : "off";
+    setMode(next);
+    try {
+      await invoke("set_overlay_mode", { mode: next });
+    } catch {
+      /* ignore */
+    }
+  };
+  const bumpFont = async (delta: number) => {
+    const next = Math.max(12, Math.min(72, fontSize + delta));
+    setFontSize(next);
+    try {
+      await invoke("set_overlay_font_size", { size: next });
+    } catch {
+      /* ignore */
+    }
+  };
+  const lockOverlay = async () => {
+    setLocked(true);
+    try {
+      await invoke("set_overlay_locked", { locked: true });
+    } catch {
+      /* ignore */
+    }
+  };
+  const hideOverlay = async () => {
+    setMode("off");
+    try {
+      await invoke("set_overlay_mode", { mode: "off" });
+    } catch {
+      /* ignore */
+    }
+  };
+  const modeLabel = mode === "off" ? "OFF" : mode === "dual" ? "NL+EN" : "EN";
+
   return (
     <div
       className={`overlay-shell${locked ? "" : " unlocked"}`}
       data-tauri-drag-region
       style={{ ["--overlay-font-size" as any]: `${fontSize}px` }}
     >
+      {!locked && (
+        <div className="overlay-controls" onMouseDown={(e) => e.stopPropagation()}>
+          <button
+            className="ovc-btn"
+            title="Cycle subtitles: off / source+target / target only"
+            onClick={cycleMode}
+          >
+            🌐 {modeLabel}
+          </button>
+          <button className="ovc-btn" title="Smaller text" onClick={() => bumpFont(-2)}>
+            A−
+          </button>
+          <button className="ovc-btn" title="Larger text" onClick={() => bumpFont(+2)}>
+            A+
+          </button>
+          <button
+            className="ovc-btn"
+            title="Lock (click-through). Unlock from the main window."
+            onClick={lockOverlay}
+          >
+            🔒
+          </button>
+          <button
+            className="ovc-btn"
+            title="Hide subtitles (sets mode to off)"
+            onClick={hideOverlay}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="overlay-lines" data-tauri-drag-region>
         {segments.length === 0 && !pending && (
           <div className="overlay-line muted" data-tauri-drag-region>

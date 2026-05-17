@@ -87,10 +87,41 @@ html, body, #overlay-root {
 }
 .overlay-shell:not(.unlocked) .resize-handle { display: none; }
 
-/* When unlocked: faint dashed outline so the user can find where to grab
+/* When unlocked: brighter dashed outline so the user can find where to grab
    even though the rest of the shell is transparent. */
 .overlay-shell.unlocked {
-  outline: 1px dashed rgba(255, 255, 255, 0.25);
-  outline-offset: -1px;
-  border-radius: 4px;
+  outline: 2px dashed rgba(255, 200, 100, 0.55);
+  outline-offset: -2px;
+  border-radius: 6px;
 }
+
+/* Floating control strip pinned to the top-right when unlocked. Pointer
+   events stop here so clicks hit the buttons instead of starting a
+   window drag. */
+.overlay-controls {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  background: rgba(20, 20, 24, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 3px;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.ovc-btn {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  font: 500 11px -apple-system, system-ui, sans-serif;
+  padding: 4px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ovc-btn:hover { background: rgba(255, 255, 255, 0.15); }
+.ovc-btn:active { background: rgba(255, 255, 255, 0.28); }
