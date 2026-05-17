@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -15,8 +16,13 @@ pub struct Segment {
     pub dutch: String,
     #[serde(default)]
     pub english: Option<String>,
+    /// Free-form display name (kept for backward compat with old JSON files).
     #[serde(default)]
     pub speaker: Option<String>,
+    /// Deepgram diarization speaker id (0, 1, 2, …). Maps to a human name
+    /// via `Meeting::speaker_names` if the user labelled it.
+    #[serde(default)]
+    pub speaker_id: Option<u32>,
     pub is_final: bool,
 }
 
@@ -25,6 +31,22 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MeetingCost {
+    /// Seconds of audio streamed to Deepgram.
+    #[serde(default)]
+    pub deepgram_audio_secs: f64,
+    /// Anthropic input tokens consumed.
+    #[serde(default)]
+    pub anthropic_input_tokens: u64,
+    /// Anthropic output tokens consumed.
+    #[serde(default)]
+    pub anthropic_output_tokens: u64,
+    /// Cache-read tokens (cheaper); separate so totals stay honest.
+    #[serde(default)]
+    pub anthropic_cache_read_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +64,19 @@ pub struct Meeting {
     pub summary_updated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub chat: Vec<ChatMessage>,
+    /// User-typed freeform notes for this meeting.
+    #[serde(default)]
+    pub notes: String,
+    /// Filter tags. Plain strings ("standup", "customer", "project-X").
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Mapping from Deepgram speaker_id → user-given human name.
+    /// Keys are stringified u32 to keep JSON simple.
+    #[serde(default)]
+    pub speaker_names: HashMap<String, String>,
+    /// Running cost tally.
+    #[serde(default)]
+    pub cost: MeetingCost,
 }
 
 impl Meeting {
@@ -55,6 +90,10 @@ impl Meeting {
             summary: None,
             summary_updated_at: None,
             chat: vec![],
+            notes: String::new(),
+            tags: vec![],
+            speaker_names: HashMap::new(),
+            cost: MeetingCost::default(),
         }
     }
 

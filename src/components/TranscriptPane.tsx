@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { api } from "../lib/tauri";
 import type { Segment } from "../lib/types";
 
 interface Props {
@@ -6,6 +7,18 @@ interface Props {
   pendingId?: string;
   meetingId?: string;
   showEnglish?: boolean;
+  speakerNames?: Record<string, string>;
+  onError?: (msg: string) => void;
+}
+
+function speakerLabel(
+  speaker_id: number | null | undefined,
+  names: Record<string, string> | undefined,
+): string | null {
+  if (speaker_id == null) return null;
+  const key = String(speaker_id);
+  const mapped = names?.[key];
+  return mapped && mapped.trim() ? mapped : `Speaker ${speaker_id + 1}`;
 }
 
 function fmtTime(iso: string): string {
@@ -39,10 +52,28 @@ function buildEnglishTranscript(segments: Segment[]): string {
 
 type CopyKind = "nl" | "en";
 
-export function TranscriptPane({ segments, pendingId, showEnglish = true }: Props) {
+export function TranscriptPane({
+  segments,
+  pendingId,
+  meetingId,
+  showEnglish = true,
+  speakerNames,
+  onError,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const [copied, setCopied] = useState<CopyKind | null>(null);
+  const [editingSpeaker, setEditingSpeaker] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+
+  const commitSpeakerName = async (sid: number) => {
+    setEditingSpeaker(null);
+    try {
+      await api.setSpeakerName(meetingId, sid, draft.trim());
+    } catch (err) {
+      onError?.(`speaker: ${err}`);
+    }
+  };
 
   const doCopy = async (kind: CopyKind) => {
     const text =
@@ -116,6 +147,40 @@ export function TranscriptPane({ segments, pendingId, showEnglish = true }: Prop
             <div className="segment-time">{fmtTime(s.started_at)}</div>
             <div className={`segment-cols${showEnglish ? "" : " single"}`}>
               <div className="col nl">
+                {(() => {
+                  const sid = s.speaker_id ?? null;
+                  const label = speakerLabel(sid, speakerNames);
+                  if (label == null) return null;
+                  if (editingSpeaker === sid) {
+                    return (
+                      <input
+                        className="segment-speaker-input"
+                        autoFocus
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={() => sid != null && commitSpeakerName(sid)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          if (e.key === "Escape") setEditingSpeaker(null);
+                        }}
+                      />
+                    );
+                  }
+                  return (
+                    <div
+                      className="segment-speaker"
+                      title="Click to rename this speaker"
+                      onClick={() => {
+                        if (sid == null) return;
+                        setDraft(speakerNames?.[String(sid)] ?? "");
+                        setEditingSpeaker(sid);
+                      }}
+                    >
+                      {label}
+                    </div>
+                  );
+                })()}
                 {showEnglish && <div className="lang-label">NL</div>}
                 <div className="text">{s.dutch || <em>…</em>}</div>
               </div>

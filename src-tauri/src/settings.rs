@@ -22,6 +22,20 @@ pub struct ApiKeys {
     /// can grab and drag/resize it.
     #[serde(default = "default_overlay_locked")]
     pub overlay_locked: bool,
+    /// Custom vocabulary fed to Deepgram (`keyterm` parameter on Nova-3).
+    /// One word/phrase per entry — colleague names, jargon, etc. Boosts
+    /// transcription accuracy for those terms specifically.
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Saved overlay window geometry (None = let Tauri center).
+    #[serde(default)]
+    pub overlay_x: Option<i32>,
+    #[serde(default)]
+    pub overlay_y: Option<i32>,
+    #[serde(default)]
+    pub overlay_w: Option<u32>,
+    #[serde(default)]
+    pub overlay_h: Option<u32>,
 }
 
 impl Default for ApiKeys {
@@ -33,6 +47,11 @@ impl Default for ApiKeys {
             overlay_mode: default_overlay(),
             overlay_font_size: default_overlay_size(),
             overlay_locked: default_overlay_locked(),
+            keywords: vec![],
+            overlay_x: None,
+            overlay_y: None,
+            overlay_w: None,
+            overlay_h: None,
         }
     }
 }
@@ -50,6 +69,7 @@ pub struct SettingsView {
     pub overlay_mode: String,
     pub overlay_font_size: u32,
     pub overlay_locked: bool,
+    pub keywords: Vec<String>,
 }
 
 /// ~/Library/Application Support/com.onetruedutchie.app/keys.json
@@ -78,7 +98,36 @@ pub fn settings_view() -> Result<SettingsView> {
         overlay_mode: keys.overlay_mode.clone(),
         overlay_font_size: keys.overlay_font_size,
         overlay_locked: keys.overlay_locked,
+        keywords: keys.keywords.clone(),
     })
+}
+
+pub fn read_keywords() -> Vec<String> {
+    read_keys().map(|k| k.keywords).unwrap_or_default()
+}
+
+pub fn set_keywords(words: Vec<String>) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    keys.keywords = words
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    write_keys_back(&keys)
+}
+
+pub fn read_overlay_geometry() -> (Option<i32>, Option<i32>, Option<u32>, Option<u32>) {
+    let k = read_keys().unwrap_or_default();
+    (k.overlay_x, k.overlay_y, k.overlay_w, k.overlay_h)
+}
+
+pub fn set_overlay_geometry(x: i32, y: i32, w: u32, h: u32) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    keys.overlay_x = Some(x);
+    keys.overlay_y = Some(y);
+    keys.overlay_w = Some(w);
+    keys.overlay_h = Some(h);
+    write_keys_back(&keys)
 }
 
 pub fn read_overlay_mode() -> String {

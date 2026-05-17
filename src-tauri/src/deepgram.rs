@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 const DEEPGRAM_WS_URL: &str = "wss://api.deepgram.com/v1/listen";
 
+#[derive(Clone)]
 pub struct DeepgramConfig {
     pub api_key: String,
     pub model: String,    // "nova-3"
@@ -19,6 +20,11 @@ pub struct DeepgramConfig {
     pub sample_rate: u32, // 16000
     pub channels: u16,    // 1
     pub interim: bool,
+    /// Speaker diarization on/off — labels words with a speaker id so we
+    /// can distinguish "Speaker 1" from "Speaker 2" in real meetings.
+    pub diarize: bool,
+    /// Custom vocabulary (Nova-3 `keyterm`) — boosts these words/phrases.
+    pub keyterms: Vec<String>,
 }
 
 impl Default for DeepgramConfig {
@@ -33,6 +39,8 @@ impl Default for DeepgramConfig {
             sample_rate: 16_000,
             channels: 1,
             interim: true,
+            diarize: true,
+            keyterms: vec![],
         }
     }
 }
@@ -42,6 +50,7 @@ pub enum DeepgramEvent {
     Interim {
         text: String,
         start: f64,
+        speaker: Option<u32>,
     },
     Final {
         text: String,
@@ -50,10 +59,26 @@ pub enum DeepgramEvent {
         speech_final: bool,
         /// "en", "nl", etc. — None if Deepgram didn't tag this Result.
         language: Option<String>,
+        /// Diarization speaker id of the first word, when diarize=true.
+        speaker: Option<u32>,
     },
     UtteranceEnd,
+    /// Periodic stats from the sender side. Used to tally meeting cost.
+    Stats {
+        /// Audio bytes streamed to Deepgram since the last Stats event.
+        bytes_since_last: u64,
+    },
+    /// WebSocket disconnected/reconnected. Used to surface dg status.
+    Status(DgStatus),
     Error(String),
     Closed,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DgStatus {
+    Connected,
+    Reconnecting { attempt: u32, retry_in_ms: u64 },
+    Disconnected,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +123,15 @@ struct DgAlternative {
     languages: Vec<String>,
     #[serde(default)]
     language: Option<String>,
+    /// Per-word breakdown — used for diarization (speaker_id per word).
+    #[serde(default)]
+    words: Vec<DgWord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DgWord {
+    #[serde(default)]
+    speaker: Option<u32>,
 }
 
 pub async fn run(
@@ -122,10 +156,12 @@ pub async fn run(
 
     // Sender: forward audio frames to Deepgram, plus periodic KeepAlive.
     let send_cancel = cancel.clone();
+    let out_for_meta = out.clone();
     let sender = tokio::spawn(async move {
         let mut keepalive = tokio::time::interval(Duration::from_secs(5));
         keepalive.tick().await; // skip immediate
         let mut total_bytes: u64 = 0;
+        let mut bytes_since_tick: u64 = 0;
         let mut report = tokio::time::interval(Duration::from_secs(5));
         report.tick().await;
         loop {
@@ -137,10 +173,17 @@ pub async fn run(
                 }
                 _ = report.tick() => {
                     tracing::info!(total_bytes, "deepgram audio sent");
+                    // 16-bit mono 16 kHz = 32000 bytes/sec. Report seconds
+                    // streamed since last tick so the Meeting can tally cost.
+                    let _ = out_for_meta
+                        .send(DeepgramEvent::Stats { bytes_since_last: bytes_since_tick })
+                        .await;
+                    bytes_since_tick = 0;
                 }
                 chunk = audio_rx.recv() => match chunk {
                     Some(bytes) => {
                         total_bytes += bytes.len() as u64;
+                        bytes_since_tick += bytes.len() as u64;
                         if sink.send(Message::Binary(bytes.to_vec())).await.is_err() {
                             break;
                         }
@@ -214,6 +257,12 @@ fn into_event(m: DgMessage) -> Option<DeepgramEvent> {
                     .cloned()
                     .or_else(|| a.language.clone())
             });
+            // Speaker from the first word — chunks are short enough that a
+            // single speaker is the usual case. Mixed-speaker chunks are
+            // labelled with whoever spoke first; good enough for meetings.
+            let speaker: Option<u32> = alt
+                .and_then(|a| a.words.first())
+                .and_then(|w| w.speaker);
             if text.trim().is_empty() && !m.speech_final {
                 return None;
             }
@@ -224,11 +273,13 @@ fn into_event(m: DgMessage) -> Option<DeepgramEvent> {
                     duration: m.duration,
                     speech_final: m.speech_final,
                     language,
+                    speaker,
                 })
             } else {
                 Some(DeepgramEvent::Interim {
                     text,
                     start: m.start,
+                    speaker,
                 })
             }
         }
@@ -266,6 +317,16 @@ fn build_url(cfg: &DeepgramConfig) -> String {
         // rather than waiting for the speaker to fully pause.
         q.append_pair("endpointing", "500");
         q.append_pair("utterance_end_ms", "1500");
+        if cfg.diarize {
+            q.append_pair("diarize", "true");
+        }
+        for term in &cfg.keyterms {
+            let t = term.trim();
+            if !t.is_empty() {
+                // Nova-3 boosts specific terms via `keyterm`.
+                q.append_pair("keyterm", t);
+            }
+        }
         q.append_pair("vad_events", "true");
     }
     u.to_string()

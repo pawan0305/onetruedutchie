@@ -1,7 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AudioLevel,
+  DgStatusPayload,
   Meeting,
+  MeetingCost,
   MeetingSummaryRow,
   SettingsView,
 } from "./types";
@@ -18,6 +21,16 @@ export const api = {
     invoke<SettingsView>("set_overlay_font_size", { size }),
   setOverlayLocked: (locked: boolean) =>
     invoke<SettingsView>("set_overlay_locked", { locked }),
+  setVocab: (words: string[]) =>
+    invoke<SettingsView>("set_vocab", { words }),
+  saveOverlayGeometry: (x: number, y: number, w: number, h: number) =>
+    invoke<void>("save_overlay_geometry", { x, y, w, h }),
+  setMeetingNotes: (id: string | undefined, notes: string) =>
+    invoke<void>("set_meeting_notes", { id, notes }),
+  setMeetingTags: (id: string | undefined, tags: string[]) =>
+    invoke<void>("set_meeting_tags", { id, tags }),
+  setSpeakerName: (id: string | undefined, speakerId: number, name: string) =>
+    invoke<void>("set_speaker_name", { id, speakerId, name }),
   startMeeting: (title?: string) =>
     invoke<Meeting>("start_meeting", { title }),
   stopMeeting: () => invoke<Meeting>("stop_meeting"),
@@ -51,6 +64,9 @@ export type EventHandlers = {
   "chat:delta": { stream_id: string; delta: string };
   "chat:done": { stream_id: string; answer: string };
   "chat:error": { stream_id: string; error: string };
+  "dg:status": DgStatusPayload;
+  "audio:level": AudioLevel;
+  "cost:update": MeetingCost;
   error: { message: string };
 };
 

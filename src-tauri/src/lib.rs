@@ -61,7 +61,15 @@ pub fn run() {
             // the click-through state.
             let mode = settings::read_overlay_mode();
             let locked = settings::read_overlay_locked();
+            let (gx, gy, gw, gh) = settings::read_overlay_geometry();
             if let Some(win) = app.get_webview_window("overlay") {
+                // Restore saved position/size before showing.
+                if let (Some(w), Some(h)) = (gw, gh) {
+                    let _ = win.set_size(tauri::PhysicalSize::new(w, h));
+                }
+                if let (Some(x), Some(y)) = (gx, gy) {
+                    let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+                }
                 if mode != "off" {
                     let _ = win.show();
                     let _ = win.set_always_on_top(true);
@@ -81,6 +89,11 @@ pub fn run() {
             commands::set_overlay_mode,
             commands::set_overlay_font_size,
             commands::set_overlay_locked,
+            commands::set_vocab,
+            commands::save_overlay_geometry,
+            commands::set_meeting_notes,
+            commands::set_meeting_tags,
+            commands::set_speaker_name,
             commands::start_meeting,
             commands::stop_meeting,
             commands::current_meeting,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, on } from "./lib/tauri";
-import type { Meeting, MeetingSummaryRow, Segment, SettingsView } from "./lib/types";
+import type { AudioLevel, DgStatus, Meeting, MeetingCost, MeetingSummaryRow, Segment, SettingsView } from "./lib/types";
 import { TopBar } from "./components/TopBar";
 import { TranscriptPane } from "./components/TranscriptPane";
 import { SummaryPane } from "./components/SummaryPane";
@@ -41,6 +41,9 @@ export function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<MeetingSummaryRow[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
+  const [audioLevel, setAudioLevel] = useState<AudioLevel>({ mic: 0, sys: 0 });
+  const [dgStatus, setDgStatus] = useState<DgStatus>("disconnected");
+  const [cost, setCost] = useState<MeetingCost | null>(null);
 
   const meetingRef = useRef<Meeting | null>(null);
   meetingRef.current = meeting;
@@ -86,11 +89,15 @@ export function App() {
         setPending(null);
         setStreamingChatId(null);
         setStreamingChatText("");
+        setCost(null);
+        setAudioLevel({ mic: 0, sys: 0 });
       }),
       on("meeting:stopped", (m) => {
         setMeeting(m);
         setRunning(false);
         setPending(null);
+        setDgStatus("disconnected");
+        setAudioLevel({ mic: 0, sys: 0 });
         api.listMeetings().then(setHistory).catch(() => {});
       }),
       on("meeting:update", (m) => setMeeting(m)),
@@ -169,6 +176,9 @@ export function App() {
         setStreamingChatText("");
       }),
       on("error", ({ message }) => pushError(message)),
+      on("audio:level", (lvl) => setAudioLevel(lvl)),
+      on("dg:status", ({ status }) => setDgStatus(status)),
+      on("cost:update", (c) => setCost(c)),
     );
 
     return () => {
@@ -265,6 +275,9 @@ export function App() {
       <TopBar
         meeting={meeting}
         running={running}
+        audioLevel={audioLevel}
+        dgStatus={dgStatus}
+        cost={cost ?? meeting?.cost ?? null}
         onStart={start}
         onStop={stop}
         onOpenSettings={() => setShowSettings(true)}
@@ -311,6 +324,8 @@ export function App() {
             pendingId={pending?.id}
             meetingId={meeting?.id}
             showEnglish={settings?.translate ?? true}
+            speakerNames={meeting?.speaker_names}
+            onError={pushError}
           />
         }
         summary={
@@ -344,6 +359,8 @@ export function App() {
         <SettingsModal
           settings={settings}
           onSave={onSaveKeys}
+          onSettingsChanged={setSettings}
+          onError={pushError}
           onClose={() => setShowSettings(false)}
         />
       )}

@@ -84,6 +84,9 @@ final class Sink {
     private var timer: DispatchSourceTimer?
     private var bytesSinceLog: Int = 0
     private var lastLog: Date = Date()
+    /// Counts ticks so we can emit audio-level info every Nth tick instead
+    /// of on every 100 ms tick (5/sec is plenty for a UI meter).
+    private var ticksSinceMeta: Int = 0
 
     func start() {
         let t = DispatchSource.makeTimerSource(
@@ -153,10 +156,32 @@ final class Sink {
             stdoutWriter.write(data)
         }
 
+        // Emit audio-level metadata for the top-bar meter ~5x/sec.
+        ticksSinceMeta += 1
+        if ticksSinceMeta >= 2 {
+            ticksSinceMeta = 0
+            let micRms = rms(mic, count: micCount)
+            let sysRms = rms(sys, count: sysCount)
+            // Compact JSON on stderr with a known prefix; Rust grep
+            // recognises the prefix and converts to an audio:level event.
+            errLine("META:level mic=\(String(format: "%.4f", micRms)) sys=\(String(format: "%.4f", sysRms))")
+        }
+
         if shouldLog {
             logLine("mix: \(bytesForLog) bytes/5s (mic=\(micCount), sys=\(sysCount), backlog mic=\(micDepth) sys=\(sysDepth))")
         }
     }
+}
+
+/// RMS amplitude of an Int16 PCM buffer, normalised to 0..1.
+func rms(_ samples: [Int16], count: Int) -> Double {
+    if count == 0 { return 0.0 }
+    var acc: Double = 0
+    for i in 0..<count {
+        let v = Double(samples[i]) / 32768.0
+        acc += v * v
+    }
+    return (acc / Double(count)).squareRoot()
 }
 
 // ---------- conversion helpers ----------

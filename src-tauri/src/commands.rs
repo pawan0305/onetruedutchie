@@ -78,6 +78,131 @@ pub async fn set_overlay_mode(mode: String, app: AppHandle) -> Result<SettingsVi
     settings::settings_view().map_err(|e| e.to_string())
 }
 
+/// Save the user's custom vocabulary list (fed to Deepgram as keyterms).
+#[tauri::command]
+pub async fn set_vocab(words: Vec<String>) -> Result<SettingsView, String> {
+    settings::set_keywords(words).map_err(|e| e.to_string())?;
+    settings::settings_view().map_err(|e| e.to_string())
+}
+
+/// Persist the overlay window position + size so it doesn't reset on restart.
+#[tauri::command]
+pub async fn save_overlay_geometry(x: i32, y: i32, w: u32, h: u32) -> Result<(), String> {
+    settings::set_overlay_geometry(x, y, w, h).map_err(|e| e.to_string())
+}
+
+/// Update the live meeting's notes (string).
+#[tauri::command]
+pub async fn set_meeting_notes(
+    id: Option<Uuid>,
+    notes: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    if let Some(handle) = state.current() {
+        let live_id = handle.meeting.read().id;
+        if id.map(|i| i == live_id).unwrap_or(true) {
+            handle.meeting.write().notes = notes;
+            let snap = handle.meeting.read().clone();
+            state.emit("meeting:update", snap);
+            return Ok(());
+        }
+    }
+    let Some(meeting_id) = id else { return Err("no meeting".into()) };
+    let dir = state.meetings_dir();
+    let state_clone = state.inner().clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<crate::state::Meeting> {
+        let mut m = storage::load_meeting(&dir, meeting_id)?;
+        m.notes = notes;
+        storage::save_meeting(&dir, &m)?;
+        Ok(m)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+    .map(|m| state_clone.emit("meeting:update", m))
+}
+
+/// Update tag list on the live or a historical meeting.
+#[tauri::command]
+pub async fn set_meeting_tags(
+    id: Option<Uuid>,
+    tags: Vec<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let tags: Vec<String> = tags
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if let Some(handle) = state.current() {
+        let live_id = handle.meeting.read().id;
+        if id.map(|i| i == live_id).unwrap_or(true) {
+            handle.meeting.write().tags = tags;
+            let snap = handle.meeting.read().clone();
+            state.emit("meeting:update", snap);
+            return Ok(());
+        }
+    }
+    let Some(meeting_id) = id else { return Err("no meeting".into()) };
+    let dir = state.meetings_dir();
+    let state_clone = state.inner().clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<crate::state::Meeting> {
+        let mut m = storage::load_meeting(&dir, meeting_id)?;
+        m.tags = tags;
+        storage::save_meeting(&dir, &m)?;
+        Ok(m)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+    .map(|m| state_clone.emit("meeting:update", m))
+}
+
+/// Label a diarized speaker ("0", "1", …) with a human name.
+#[tauri::command]
+pub async fn set_speaker_name(
+    id: Option<Uuid>,
+    speaker_id: u32,
+    name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let key = speaker_id.to_string();
+    let name = name.trim().to_string();
+    if let Some(handle) = state.current() {
+        let live_id = handle.meeting.read().id;
+        if id.map(|i| i == live_id).unwrap_or(true) {
+            {
+                let mut m = handle.meeting.write();
+                if name.is_empty() {
+                    m.speaker_names.remove(&key);
+                } else {
+                    m.speaker_names.insert(key, name);
+                }
+            }
+            let snap = handle.meeting.read().clone();
+            state.emit("meeting:update", snap);
+            return Ok(());
+        }
+    }
+    let Some(meeting_id) = id else { return Err("no meeting".into()) };
+    let dir = state.meetings_dir();
+    let state_clone = state.inner().clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<crate::state::Meeting> {
+        let mut m = storage::load_meeting(&dir, meeting_id)?;
+        if name.is_empty() {
+            m.speaker_names.remove(&key);
+        } else {
+            m.speaker_names.insert(key, name);
+        }
+        storage::save_meeting(&dir, &m)?;
+        Ok(m)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+    .map(|m| state_clone.emit("meeting:update", m))
+}
+
 /// Adjust the subtitle font size in pixels.
 #[tauri::command]
 pub async fn set_overlay_font_size(
@@ -270,10 +395,11 @@ pub async fn export_english_transcript(
     if transcript.trim().is_empty() {
         return Ok(String::new());
     }
-    claude
+    let (text, _usage) = claude
         .translate_full(&transcript)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(text)
 }
 
 /// Rename a historical meeting on disk. The active meeting (if any) is
@@ -333,13 +459,18 @@ pub async fn regenerate_summary(
         let meeting = handle.meeting.clone();
         tokio::spawn(async move {
             match claude.summarize(&transcript).await {
-                Ok(s) => {
+                Ok((s, usage)) => {
                     let now = Utc::now();
                     {
                         let mut m = meeting.write();
                         m.summary = Some(s.clone());
                         m.summary_updated_at = Some(now);
+                        m.cost.anthropic_input_tokens +=
+                            usage.input_tokens + usage.cache_creation_input_tokens;
+                        m.cost.anthropic_output_tokens += usage.output_tokens;
+                        m.cost.anthropic_cache_read_tokens += usage.cache_read_input_tokens;
                     }
+                    emit_cost(&app_state, &meeting);
                     app_state.emit(
                         "summary:update",
                         json!({ "summary": s, "updated_at": now }),
@@ -381,11 +512,15 @@ pub async fn regenerate_summary(
             return;
         }
         match claude.summarize(&transcript).await {
-            Ok(s) => {
+            Ok((s, usage)) => {
                 let now = Utc::now();
                 let mut updated = m.clone();
                 updated.summary = Some(s.clone());
                 updated.summary_updated_at = Some(now);
+                updated.cost.anthropic_input_tokens +=
+                    usage.input_tokens + usage.cache_creation_input_tokens;
+                updated.cost.anthropic_output_tokens += usage.output_tokens;
+                updated.cost.anthropic_cache_read_tokens += usage.cache_read_input_tokens;
                 let save_dir = dir.clone();
                 let to_save = updated.clone();
                 let _ = tokio::task::spawn_blocking(move || {
@@ -546,20 +681,97 @@ async fn run_meeting(
     //    sidetone bleeding into system loopback) we get one phrase, not two.
     let audio_rx = audio::start_capture(&state.app_handle, cancel.clone(), true).await?;
 
-    // 2. Deepgram session.
-    let (dg_tx, mut dg_rx) = mpsc::channel::<DeepgramEvent>(128);
+    // 2. Broadcast audio so we can re-subscribe a fresh Deepgram session
+    //    after a disconnect without losing the audio sidecar.
+    let (audio_bcast, _) = tokio::sync::broadcast::channel::<bytes::Bytes>(256);
     {
-        let cfg = DeepgramConfig {
-            api_key: dg_key,
-            ..Default::default()
-        };
-        let cancel_dg = cancel.clone();
+        let bcast = audio_bcast.clone();
+        let fwd_cancel = cancel.clone();
         tokio::spawn(async move {
-            if let Err(err) = deepgram::run(cfg, audio_rx, dg_tx, cancel_dg).await {
-                tracing::warn!(?err, "deepgram failed");
+            let mut rx = audio_rx;
+            loop {
+                tokio::select! {
+                    _ = fwd_cancel.cancelled() => break,
+                    chunk = rx.recv() => match chunk {
+                        Some(bytes) => { let _ = bcast.send(bytes); }
+                        None => break,
+                    }
+                }
             }
         });
     }
+
+    // 3. Deepgram session inside a reconnect loop. Status events flow
+    //    through dg_tx to the main meeting loop, which forwards them to
+    //    the frontend as a `dg:status` event.
+    let (dg_tx, mut dg_rx) = mpsc::channel::<DeepgramEvent>(256);
+    {
+        let cfg_template = DeepgramConfig {
+            api_key: dg_key,
+            keyterms: settings::read_keywords(),
+            ..Default::default()
+        };
+        let bcast = audio_bcast.clone();
+        let cancel_dg = cancel.clone();
+        let dg_tx_for_loop = dg_tx.clone();
+        tokio::spawn(async move {
+            let mut attempt: u32 = 0;
+            loop {
+                if cancel_dg.is_cancelled() { break; }
+                let _ = dg_tx_for_loop
+                    .send(DeepgramEvent::Status(deepgram::DgStatus::Connected))
+                    .await;
+
+                let mut bcast_rx = bcast.subscribe();
+                let (audio_mpsc_tx, audio_mpsc_rx) = mpsc::channel::<bytes::Bytes>(128);
+                let adapter_cancel = cancel_dg.clone();
+                tokio::spawn(async move {
+                    loop {
+                        tokio::select! {
+                            _ = adapter_cancel.cancelled() => break,
+                            r = bcast_rx.recv() => match r {
+                                Ok(bytes) => {
+                                    if audio_mpsc_tx.send(bytes).await.is_err() { break; }
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                });
+
+                let res = deepgram::run(
+                    cfg_template.clone(),
+                    audio_mpsc_rx,
+                    dg_tx_for_loop.clone(),
+                    cancel_dg.clone(),
+                ).await;
+
+                if cancel_dg.is_cancelled() { break; }
+                tracing::warn!(?res, attempt, "deepgram session ended, retrying");
+
+                attempt = attempt.saturating_add(1);
+                let delay_ms: u64 = (500u64)
+                    .saturating_mul(1u64 << attempt.min(5))
+                    .min(30_000);
+                let _ = dg_tx_for_loop.send(DeepgramEvent::Status(
+                    deepgram::DgStatus::Reconnecting { attempt, retry_in_ms: delay_ms },
+                )).await;
+
+                let sleep_cancel = cancel_dg.clone();
+                tokio::select! {
+                    _ = sleep_cancel.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => {}
+                }
+            }
+            let _ = dg_tx_for_loop
+                .send(DeepgramEvent::Status(deepgram::DgStatus::Disconnected))
+                .await;
+        });
+    }
+
+    // Need a Clone of DeepgramConfig so the loop can clone per attempt.
+    // (Clone derived below in the type; nothing to do here.)
 
     let claude = Arc::new(AnthropicClient::new(an_key));
 
@@ -635,6 +847,9 @@ struct PendingSeg {
     /// History of (observed_at, text) interims for recomputing anchored as
     /// time passes. Bounded.
     history: std::collections::VecDeque<(std::time::Instant, String)>,
+    /// Diarization speaker id of the first interim that had one. Doesn't
+    /// change mid-chunk — chunks rarely straddle speakers.
+    speaker_id: Option<u32>,
 }
 
 impl PendingSeg {
@@ -644,6 +859,7 @@ impl PendingSeg {
             started_at: Utc::now(),
             anchored: String::new(),
             history: std::collections::VecDeque::new(),
+            speaker_id: None,
         }
     }
 
@@ -682,6 +898,7 @@ impl PendingSeg {
             dutch,
             english: None,
             speaker: None,
+            speaker_id: self.speaker_id,
             is_final,
         }
     }
@@ -744,12 +961,40 @@ async fn handle_dg_event(
     claude: &Arc<AnthropicClient>,
 ) {
     match evt {
-        DeepgramEvent::Interim { text, .. } => {
+        DeepgramEvent::Stats { bytes_since_last } => {
+            // 16-bit mono 16 kHz = 32000 bytes/sec → seconds = bytes/32000.
+            let seconds = bytes_since_last as f64 / 32_000.0;
+            {
+                let mut m = meeting.write();
+                m.cost.deepgram_audio_secs += seconds;
+            }
+            emit_cost(state, meeting);
+            return;
+        }
+        DeepgramEvent::Status(s) => {
+            let label = match s {
+                deepgram::DgStatus::Connected => "connected",
+                deepgram::DgStatus::Reconnecting { .. } => "reconnecting",
+                deepgram::DgStatus::Disconnected => "disconnected",
+            };
+            let payload = match s {
+                deepgram::DgStatus::Reconnecting { attempt, retry_in_ms } => {
+                    json!({ "status": label, "attempt": attempt, "retry_in_ms": retry_in_ms })
+                }
+                _ => json!({ "status": label }),
+            };
+            state.emit("dg:status", payload);
+            return;
+        }
+        DeepgramEvent::Interim { text, speaker, .. } => {
             let seg = pending.get_or_insert_with(PendingSeg::new);
+            if speaker.is_some() && seg.speaker_id.is_none() {
+                seg.speaker_id = speaker;
+            }
             let display = seg.ingest_interim(&text);
             state.emit("segment:pending", seg.to_segment(display, false));
         }
-        DeepgramEvent::Final { text, language, .. } => {
+        DeepgramEvent::Final { text, language, speaker, .. } => {
             // Each is_final=true closes a chunk → commit as its own segment
             // (live translation per chunk). The anchor merge ensures we
             // don't drop content Deepgram revised away mid-chunk.
@@ -759,7 +1004,10 @@ async fn handle_dg_event(
                 }
                 return;
             }
-            let p = pending.take().unwrap_or_else(PendingSeg::new);
+            let mut p = pending.take().unwrap_or_else(PendingSeg::new);
+            if speaker.is_some() && p.speaker_id.is_none() {
+                p.speaker_id = speaker;
+            }
             let dutch = p.finalize(&text);
             if dutch.trim().is_empty() { return; }
             let mut done = p.to_segment(dutch, true);
@@ -814,14 +1062,19 @@ fn spawn_translate(
 ) {
     tokio::spawn(async move {
         match claude.translate(&seg.dutch).await {
-            Ok(en) => {
+            Ok((en, usage)) => {
                 let en = en.trim().to_string();
                 {
                     let mut m = meeting.write();
                     if let Some(s) = m.segments.iter_mut().find(|s| s.id == seg.id) {
                         s.english = Some(en.clone());
                     }
+                    m.cost.anthropic_input_tokens += usage.input_tokens
+                        + usage.cache_creation_input_tokens;
+                    m.cost.anthropic_output_tokens += usage.output_tokens;
+                    m.cost.anthropic_cache_read_tokens += usage.cache_read_input_tokens;
                 }
+                emit_cost(&state, &meeting);
                 state.emit(
                     "segment:translated",
                     json!({ "id": seg.id, "english": en }),
@@ -840,6 +1093,11 @@ fn spawn_translate(
             }
         }
     });
+}
+
+fn emit_cost(state: &Arc<AppState>, meeting: &Arc<RwLock<Meeting>>) {
+    let cost = meeting.read().cost.clone();
+    state.emit("cost:update", cost);
 }
 
 fn default_title() -> String {

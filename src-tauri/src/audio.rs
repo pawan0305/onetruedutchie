@@ -25,6 +25,8 @@ pub async fn start_capture(
     cancel: CancellationToken,
     include_mic: bool,
 ) -> Result<mpsc::Receiver<Bytes>> {
+    use tauri::Emitter;
+    let app_for_meta = app.clone();
     let bin = resolve_sidecar(app)?;
     tracing::info!(?bin, "spawning audio sidecar");
 
@@ -52,11 +54,26 @@ pub async fn start_capture(
 
     let (tx, rx) = mpsc::channel::<Bytes>(64);
 
-    // Pipe stderr -> tracing
+    // Pipe stderr -> tracing. META:level lines are converted to an
+    // audio:level event so the top-bar VU meter can render.
     tokio::spawn(async move {
         let mut reader = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            if let Some(rest) = line.strip_prefix("ERR ") {
+            if let Some(rest) = line.strip_prefix("META:level ") {
+                let mut mic: f32 = 0.0;
+                let mut sys: f32 = 0.0;
+                for kv in rest.split_whitespace() {
+                    if let Some(v) = kv.strip_prefix("mic=") {
+                        mic = v.parse().unwrap_or(0.0);
+                    } else if let Some(v) = kv.strip_prefix("sys=") {
+                        sys = v.parse().unwrap_or(0.0);
+                    }
+                }
+                let _ = app_for_meta.emit(
+                    "audio:level",
+                    serde_json::json!({ "mic": mic, "sys": sys }),
+                );
+            } else if let Some(rest) = line.strip_prefix("ERR ") {
                 tracing::warn!(target: "audio_sidecar", "{}", rest);
             } else if let Some(rest) = line.strip_prefix("LOG ") {
                 tracing::info!(target: "audio_sidecar", "{}", rest);

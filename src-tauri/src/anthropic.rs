@@ -68,10 +68,24 @@ enum ContentBlock<'a> {
     },
 }
 
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct Usage {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
+}
+
 #[derive(Debug, Deserialize)]
 struct MessageResp {
     #[serde(default)]
     content: Vec<RespBlock>,
+    #[serde(default)]
+    usage: Usage,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,9 +119,10 @@ impl AnthropicClient {
     }
 
     /// Translate Dutch text to English. Non-streaming for simplicity & low overhead.
-    pub async fn translate(&self, dutch: &str) -> Result<String> {
+    /// Returns (english, usage).
+    pub async fn translate(&self, dutch: &str) -> Result<(String, Usage)> {
         if dutch.trim().is_empty() {
-            return Ok(String::new());
+            return Ok((String::new(), Usage::default()));
         }
         let system = vec![SystemBlock::Text {
             text: TRANSLATE_SYSTEM,
@@ -136,14 +151,14 @@ impl AnthropicClient {
             .json()
             .await
             .context("translate: decode")?;
-        Ok(extract_text(&resp))
+        Ok((extract_text(&resp), resp.usage))
     }
 
     /// Translate the entire transcript in one shot — coherent prose rather
     /// than chunk-by-chunk translations stitched together.
-    pub async fn translate_full(&self, transcript: &str) -> Result<String> {
+    pub async fn translate_full(&self, transcript: &str) -> Result<(String, Usage)> {
         if transcript.trim().is_empty() {
-            return Ok(String::new());
+            return Ok((String::new(), Usage::default()));
         }
         let system = vec![SystemBlock::Text {
             text: TRANSLATE_FULL_SYSTEM,
@@ -174,13 +189,13 @@ impl AnthropicClient {
             .json()
             .await
             .context("translate_full: decode")?;
-        Ok(extract_text(&resp))
+        Ok((extract_text(&resp), resp.usage))
     }
 
     /// Generate a running summary of the transcript so far.
-    pub async fn summarize(&self, transcript: &str) -> Result<String> {
+    pub async fn summarize(&self, transcript: &str) -> Result<(String, Usage)> {
         if transcript.trim().is_empty() {
-            return Ok(String::new());
+            return Ok((String::new(), Usage::default()));
         }
         let system = vec![SystemBlock::Text {
             text: SUMMARY_SYSTEM,
@@ -211,7 +226,7 @@ impl AnthropicClient {
             .json()
             .await
             .context("summarize: decode")?;
-        Ok(extract_text(&resp))
+        Ok((extract_text(&resp), resp.usage))
     }
 
     /// Stream a chat answer. The transcript is sent with cache_control so

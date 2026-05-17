@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import type { Meeting, SettingsView } from "../lib/types";
+import type { AudioLevel, DgStatus, Meeting, MeetingCost, SettingsView } from "../lib/types";
 
 interface Props {
   meeting: Meeting | null;
   running: boolean;
   settings: SettingsView | null;
+  audioLevel: AudioLevel;
+  dgStatus: DgStatus;
+  cost: MeetingCost | null;
   onStart: () => void;
   onStop: () => void;
   onOpenSettings: () => void;
@@ -16,10 +19,35 @@ interface Props {
   onToggleOverlayLocked: () => void;
 }
 
+/// Deepgram nova-3 streaming ≈ $0.0043 / minute. Haiku 4.5 ≈ $1/Mtok in,
+/// $5/Mtok out, $0.1/Mtok cache-read. Rough $ ballpark for the top bar.
+function estimateCost(c: MeetingCost): number {
+  const dg = (c.deepgram_audio_secs / 60) * 0.0043;
+  const an =
+    (c.anthropic_input_tokens / 1_000_000) * 1.0 +
+    (c.anthropic_output_tokens / 1_000_000) * 5.0 +
+    (c.anthropic_cache_read_tokens / 1_000_000) * 0.1;
+  return dg + an;
+}
+
+function VuBar({ value, color }: { value: number; color: string }) {
+  // Compress to log-ish scale so quiet speech is visible.
+  const v = Math.max(0, Math.min(1, value));
+  const pct = Math.min(100, Math.round(Math.sqrt(v) * 140));
+  return (
+    <div className="vu-track">
+      <div className="vu-fill" style={{ width: `${pct}%`, background: color }} />
+    </div>
+  );
+}
+
 export function TopBar({
   meeting,
   running,
   settings,
+  audioLevel,
+  dgStatus,
+  cost,
   onStart,
   onStop,
   onOpenSettings,
@@ -73,6 +101,36 @@ export function TopBar({
         )}
       </div>
       <div className="topbar-right">
+        {running && (
+          <div className="vu-meters" title={`Mic ${(audioLevel.mic * 100).toFixed(0)}% / Sys ${(audioLevel.sys * 100).toFixed(0)}%`}>
+            <div className="vu-row">
+              <span className="vu-label">M</span>
+              <VuBar value={audioLevel.mic} color="#ffb380" />
+            </div>
+            <div className="vu-row">
+              <span className="vu-label">S</span>
+              <VuBar value={audioLevel.sys} color="#7fb3ff" />
+            </div>
+          </div>
+        )}
+        {running && (
+          <span
+            className={`dg-status dg-status-${dgStatus}`}
+            title={
+              dgStatus === "connected" ? "Deepgram connected"
+              : dgStatus === "reconnecting" ? "Deepgram reconnecting…"
+              : "Deepgram disconnected"
+            }
+          />
+        )}
+        {cost && (cost.deepgram_audio_secs > 0 || cost.anthropic_output_tokens > 0) && (
+          <span
+            className="pane-sub"
+            title={`Deepgram ${(cost.deepgram_audio_secs / 60).toFixed(1)} min · Claude in ${cost.anthropic_input_tokens} / out ${cost.anthropic_output_tokens}`}
+          >
+            ${estimateCost(cost).toFixed(3)}
+          </span>
+        )}
         {!keysOk && (
           <span className="warn" onClick={onOpenSettings}>
             ⚠ keys not set
