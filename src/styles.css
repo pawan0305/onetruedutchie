@@ -394,7 +394,6 @@ button.ghost.danger { color: var(--danger); }
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
-  -webkit-user-drag: element;
   flex-shrink: 0;
   align-self: stretch;
 }
@@ -405,6 +404,22 @@ button.ghost.danger { color: var(--danger); }
   background: rgba(120, 170, 255, 0.18);
   outline: 2px dashed rgba(120, 170, 255, 0.65);
   outline-offset: -2px;
+}
+.drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  padding: 6px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .drawer-search { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .drawer-search input {

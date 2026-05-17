@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/tauri";
 import type { MeetingSummaryRow } from "../lib/types";
 
@@ -29,13 +29,89 @@ export function HistoryDrawer({
   const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
   const [tagsDraft, setTagsDraft] = useState("");
   const [query, setQuery] = useState("");
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  // Drag state. WKWebView's HTML5 drag-and-drop is unreliable, so we do
+  // it ourselves with raw mouse events. `drag` holds the active drag (id,
+  // title, cursor pos), `hoverTarget` is the id under the cursor.
+  const [drag, setDrag] = useState<
+    { id: string; title: string; x: number; y: number } | null
+  >(null);
+  const [hoverTarget, setHoverTarget] = useState<string | null>(null);
+  const dragInfo = useRef<{
+    id: string;
+    title: string;
+    startX: number;
+    startY: number;
+    started: boolean;
+  } | null>(null);
 
   useEffect(() => {
     onRefresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const startDrag = (
+    e: React.MouseEvent<HTMLSpanElement>,
+    row: MeetingSummaryRow,
+  ) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragInfo.current = {
+      id: row.id,
+      title: row.title,
+      startX: e.clientX,
+      startY: e.clientY,
+      started: false,
+    };
+
+    const onMove = (ev: MouseEvent) => {
+      const info = dragInfo.current;
+      if (!info) return;
+      if (!info.started) {
+        const dx = Math.abs(ev.clientX - info.startX);
+        const dy = Math.abs(ev.clientY - info.startY);
+        if (dx < 4 && dy < 4) return;
+        info.started = true;
+        document.body.style.cursor = "grabbing";
+      }
+      setDrag({
+        id: info.id,
+        title: info.title,
+        x: ev.clientX,
+        y: ev.clientY,
+      });
+      // Hit-test for drop target.
+      const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      const li = el?.closest("li[data-meeting-id]") as HTMLElement | null;
+      const tid = li?.dataset.meetingId ?? null;
+      setHoverTarget(tid && tid !== info.id ? tid : null);
+    };
+
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      const info = dragInfo.current;
+      dragInfo.current = null;
+      setDrag(null);
+      setHoverTarget(null);
+      if (!info || !info.started) return;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      const li = el?.closest("li[data-meeting-id]") as HTMLElement | null;
+      const tid = li?.dataset.meetingId;
+      if (!tid || tid === info.id) return;
+      const tgtRow = rows.find((x) => x.id === tid);
+      const tgtTitle = tgtRow?.title ?? "that meeting";
+      const ok = window.confirm(
+        `Merge "${info.title}" into "${tgtTitle}"?\n\nSegments, chat, notes, and tags from "${info.title}" will be combined into "${tgtTitle}", and "${info.title}" will be deleted. The combined summary will be cleared so you can regenerate it.`,
+      );
+      if (!ok) return;
+      onMerge(info.id, tid);
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   useEffect(() => {
     if (!armedDeleteId) return;
@@ -69,6 +145,14 @@ export function HistoryDrawer({
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
+      {drag && (
+        <div
+          className="drag-ghost"
+          style={{ left: drag.x + 12, top: drag.y + 12 }}
+        >
+          {drag.title}
+        </div>
+      )}
       <aside className="drawer" onClick={(e) => e.stopPropagation()}>
         <header className="drawer-header">
           <h2>Meeting history</h2>
@@ -95,57 +179,24 @@ export function HistoryDrawer({
             const armed = armedDeleteId === r.id;
             const renaming = renamingId === r.id;
             const editingTags = editingTagsId === r.id;
-            const isDragging = draggingId === r.id;
-            const isDropTarget = dropTargetId === r.id && draggingId && draggingId !== r.id;
+            const isDragging = drag?.id === r.id;
+            const isDropTarget =
+              hoverTarget === r.id && drag != null && drag.id !== r.id;
             return (
               <li
                 key={r.id}
+                data-meeting-id={r.id}
                 className={
                   (isDragging ? "history-dragging" : "") +
                   (isDropTarget ? " history-drop-target" : "")
                 }
-                onDragOver={(e) => {
-                  if (!draggingId || draggingId === r.id) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  if (dropTargetId !== r.id) setDropTargetId(r.id);
-                }}
-                onDragLeave={(e) => {
-                  // Only clear when leaving the <li> itself, not a child.
-                  const rt = e.relatedTarget as Node | null;
-                  if (rt && (e.currentTarget as Node).contains(rt)) return;
-                  if (dropTargetId === r.id) setDropTargetId(null);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const src = e.dataTransfer.getData("text/x-meeting-id");
-                  setDraggingId(null);
-                  setDropTargetId(null);
-                  if (!src || src === r.id) return;
-                  const srcRow = rows.find((x) => x.id === src);
-                  const srcTitle = srcRow?.title ?? "that meeting";
-                  const ok = window.confirm(
-                    `Merge "${srcTitle}" into "${r.title}"?\n\nSegments, chat, notes, and tags from "${srcTitle}" will be combined into "${r.title}", and "${srcTitle}" will be deleted. The combined summary will be cleared so you can regenerate it.`,
-                  );
-                  if (!ok) return;
-                  onMerge(src, r.id);
-                }}
               >
                 <span
                   className="drag-handle"
-                  draggable={!renaming && !editingTags}
                   title="Drag onto another meeting to combine"
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/x-meeting-id", r.id);
-                    e.dataTransfer.effectAllowed = "move";
-                    // Drag image = the whole <li>, so the user sees the full row floating.
-                    const li = (e.currentTarget as HTMLElement).closest("li");
-                    if (li) e.dataTransfer.setDragImage(li, 0, 0);
-                    setDraggingId(r.id);
-                  }}
-                  onDragEnd={() => {
-                    setDraggingId(null);
-                    setDropTargetId(null);
+                  onMouseDown={(e) => {
+                    if (renaming || editingTags) return;
+                    startDrag(e, r);
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
