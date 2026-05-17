@@ -2,6 +2,10 @@
 
 **Real-time meeting transcription, translation, and AI assistant for macOS.**
 
+[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.1.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.1.0/OneTrueDutchie_0.1.0_aarch64.dmg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey?style=for-the-badge)](#prerequisites)
+
 Built originally to translate Dutch standups into English. Now handles any
 language Deepgram can recognise, and translates / summarises into any
 language Claude can write. The name stuck.
@@ -22,14 +26,15 @@ language Claude can write. The name stuck.
 ## Quick start
 
 **Download (Apple Silicon Macs):**
-Grab the latest `OneTrueDutchie_x.y.z_aarch64.dmg` from the
-[Releases page](https://github.com/pawan0305/onetruedutchie/releases),
-double-click to mount, drag OneTrueDutchie into `/Applications`.
+
+→ **[OneTrueDutchie_0.1.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.1.0/OneTrueDutchie_0.1.0_aarch64.dmg)** (5.4 MB · macOS 13+ · M1/M2/M3/M4)
+
+Double-click the .dmg to mount it, drag OneTrueDutchie into `/Applications`.
 
 Because the .dmg is ad-hoc-signed (not Apple-notarized — notarization
 costs $99/yr in the Apple Developer Program), macOS Gatekeeper will
-refuse to open it on first launch. Right-click the app in Applications
-and choose **Open**, then confirm. After this first launch it opens
+refuse to open it on first launch. **Right-click the app in Applications
+and choose Open**, then confirm. After this first launch it opens
 normally.
 
 **Build from source:**
