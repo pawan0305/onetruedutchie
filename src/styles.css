@@ -72,6 +72,18 @@ body {
   70% { box-shadow: 0 0 0 8px rgba(210,77,77,0); }
   100% { box-shadow: 0 0 0 0 rgba(210,77,77,0); }
 }
+.paused-badge {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: #f0c060;
+  background: rgba(240, 192, 96, 0.15);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 8px;
+  display: inline-block;
+  vertical-align: middle;
+}
 
 button {
   background: var(--panel-2);

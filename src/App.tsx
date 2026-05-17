@@ -46,6 +46,7 @@ export function App() {
   const [audioLevel, setAudioLevel] = useState<AudioLevel>({ mic: 0, sys: 0 });
   const [dgStatus, setDgStatus] = useState<DgStatus>("disconnected");
   const [cost, setCost] = useState<MeetingCost | null>(null);
+  const [paused, setPaused] = useState(false);
 
   // Per-pane collapse state — persisted in localStorage.
   const [transcriptCollapsed, setTranscriptCollapsed] =
@@ -98,6 +99,7 @@ export function App() {
       on("meeting:started", (m) => {
         setMeeting(m);
         setRunning(true);
+        setPaused(false);
         setPending(null);
         setStreamingChatId(null);
         setStreamingChatText("");
@@ -107,6 +109,7 @@ export function App() {
       on("meeting:stopped", (m) => {
         setMeeting(m);
         setRunning(false);
+        setPaused(false);
         setPending(null);
         setDgStatus("disconnected");
         setAudioLevel({ mic: 0, sys: 0 });
@@ -191,6 +194,7 @@ export function App() {
       on("audio:level", (lvl) => setAudioLevel(lvl)),
       on("dg:status", ({ status }) => setDgStatus(status)),
       on("cost:update", (c) => setCost(c)),
+      on("meeting:paused", ({ paused }) => setPaused(paused)),
     );
 
     return () => {
@@ -287,11 +291,21 @@ export function App() {
       <TopBar
         meeting={meeting}
         running={running}
+        paused={paused}
         audioLevel={audioLevel}
         dgStatus={dgStatus}
         cost={cost ?? meeting?.cost ?? null}
         onStart={start}
         onStop={stop}
+        onTogglePause={async () => {
+          try {
+            const next = !paused;
+            await api.setPaused(next);
+            setPaused(next);
+          } catch (err) {
+            pushError(`pause: ${err}`);
+          }
+        }}
         onOpenSettings={() => setShowSettings(true)}
         onOpenHistory={() => setShowHistory(true)}
         onRenameMeeting={renameMeeting}

@@ -89,8 +89,17 @@ pub async fn set_vocab(words: Vec<String>) -> Result<SettingsView, String> {
 /// Source language is auto-detected by Deepgram. Takes effect on the next
 /// translation / summary / chat call (no restart needed).
 #[tauri::command]
-pub async fn set_target_language(language: String) -> Result<SettingsView, String> {
+pub async fn set_target_language(
+    language: String,
+    app: AppHandle,
+) -> Result<SettingsView, String> {
     settings::set_target_language(&language).map_err(|e| e.to_string())?;
+    let resolved = settings::read_target_language();
+    use tauri::Emitter;
+    let _ = app.emit(
+        "overlay:target_language",
+        json!({ "target_language": resolved }),
+    );
     settings::settings_view().map_err(|e| e.to_string())
 }
 
@@ -268,6 +277,7 @@ pub async fn start_meeting(
     let handle = Arc::new(MeetingHandle {
         meeting: Arc::new(RwLock::new(meeting.clone())),
         cancel: cancel.clone(),
+        paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     });
     state.set_current(handle.clone());
 
@@ -306,6 +316,38 @@ pub async fn stop_meeting(state: State<'_, Arc<AppState>>) -> Result<Meeting, St
 #[tauri::command]
 pub async fn current_meeting(state: State<'_, Arc<AppState>>) -> Result<Option<Meeting>, String> {
     Ok(state.current().map(|h| h.meeting.read().clone()))
+}
+
+/// Pause / resume the live meeting. While paused, audio bytes are dropped
+/// before reaching Deepgram so DG seconds + Anthropic tokens stop accruing.
+/// The Swift audio sidecar keeps running (negligible CPU), so resuming is
+/// instantaneous — no permission re-prompts, no warm-up.
+#[tauri::command]
+pub async fn set_paused(
+    paused: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<bool, String> {
+    let Some(handle) = state.current() else {
+        return Err("no meeting in progress".into());
+    };
+    handle
+        .paused
+        .store(paused, std::sync::atomic::Ordering::Relaxed);
+    state.emit(
+        "meeting:paused",
+        json!({ "paused": paused }),
+    );
+    Ok(paused)
+}
+
+/// Read whether the live meeting is currently paused. Returns false when no
+/// meeting is in progress.
+#[tauri::command]
+pub async fn is_paused(state: State<'_, Arc<AppState>>) -> Result<bool, String> {
+    Ok(state
+        .current()
+        .map(|h| h.paused.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(false))
 }
 
 #[tauri::command]
@@ -777,18 +819,24 @@ async fn run_meeting(
     let audio_rx = audio::start_capture(&state.app_handle, cancel.clone(), true).await?;
 
     // 2. Broadcast audio so we can re-subscribe a fresh Deepgram session
-    //    after a disconnect without losing the audio sidecar.
+    //    after a disconnect without losing the audio sidecar. When paused,
+    //    we drop bytes here — sidecar keeps running, Deepgram sees nothing.
     let (audio_bcast, _) = tokio::sync::broadcast::channel::<bytes::Bytes>(256);
     {
         let bcast = audio_bcast.clone();
         let fwd_cancel = cancel.clone();
+        let paused = handle.paused.clone();
         tokio::spawn(async move {
             let mut rx = audio_rx;
             loop {
                 tokio::select! {
                     _ = fwd_cancel.cancelled() => break,
                     chunk = rx.recv() => match chunk {
-                        Some(bytes) => { let _ = bcast.send(bytes); }
+                        Some(bytes) => {
+                            if !paused.load(std::sync::atomic::Ordering::Relaxed) {
+                                let _ = bcast.send(bytes);
+                            }
+                        }
                         None => break,
                     }
                 }

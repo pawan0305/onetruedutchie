@@ -97,6 +97,8 @@ pub fn run() {
             commands::set_speaker_name,
             commands::start_meeting,
             commands::stop_meeting,
+            commands::set_paused,
+            commands::is_paused,
             commands::current_meeting,
             commands::list_meetings,
             commands::load_meeting,

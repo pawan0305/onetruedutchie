@@ -130,6 +130,12 @@ impl Meeting {
 pub struct MeetingHandle {
     pub meeting: Arc<RwLock<Meeting>>,
     pub cancel: CancellationToken,
+    /// When set, audio bytes are dropped before reaching Deepgram. The audio
+    /// sidecar keeps running (cheap) so resuming is instant, but Deepgram
+    /// usage and Claude translation calls stop. The reconnect loop will
+    /// drop the WebSocket after its idle timeout while paused; that's fine
+    /// — the loop reconnects automatically when bytes start flowing again.
+    pub paused: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub struct AppState {

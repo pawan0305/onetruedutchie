@@ -14,9 +14,38 @@ interface Settings {
   overlay_mode: string;
   overlay_font_size: number;
   overlay_locked: boolean;
+  target_language: string;
 }
 
 const MAX_LINES = 3;
+
+// Human-language-name → short uppercase code for the overlay button.
+// Falls back to first two letters of the name uppercased for anything
+// not in this table.
+const LANG_CODE: Record<string, string> = {
+  English: "EN",
+  Dutch: "NL",
+  Spanish: "ES",
+  French: "FR",
+  German: "DE",
+  Italian: "IT",
+  Portuguese: "PT",
+  Polish: "PL",
+  Russian: "RU",
+  Ukrainian: "UA",
+  Turkish: "TR",
+  Arabic: "AR",
+  Hindi: "HI",
+  "Chinese (Simplified)": "ZH",
+  "Chinese (Traditional)": "ZH",
+  Japanese: "JA",
+  Korean: "KO",
+  Indonesian: "ID",
+  Vietnamese: "VI",
+  Thai: "TH",
+};
+const langCode = (name: string): string =>
+  LANG_CODE[name] || (name || "EN").replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "EN";
 
 export function Overlay() {
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -24,6 +53,7 @@ export function Overlay() {
   const [mode, setMode] = useState<string>("dual");
   const [fontSize, setFontSize] = useState<number>(24);
   const [locked, setLocked] = useState<boolean>(true);
+  const [targetLang, setTargetLang] = useState<string>("English");
 
   useEffect(() => {
     invoke<Settings>("get_settings")
@@ -31,6 +61,7 @@ export function Overlay() {
         setMode(s.overlay_mode || "dual");
         if (s.overlay_font_size) setFontSize(s.overlay_font_size);
         if (typeof s.overlay_locked === "boolean") setLocked(s.overlay_locked);
+        if (s.target_language) setTargetLang(s.target_language);
       })
       .catch(() => {});
 
@@ -60,6 +91,9 @@ export function Overlay() {
       listen<{ font_size: number; locked: boolean }>("overlay:settings", (e) => {
         if (e.payload.font_size) setFontSize(e.payload.font_size);
         if (typeof e.payload.locked === "boolean") setLocked(e.payload.locked);
+      }),
+      listen<{ target_language: string }>("overlay:target_language", (e) => {
+        if (e.payload.target_language) setTargetLang(e.payload.target_language);
       }),
       listen<unknown>("meeting:started", () => {
         // Fresh meeting → clear stale subtitles.
@@ -145,7 +179,11 @@ export function Overlay() {
       /* ignore */
     }
   };
-  const modeLabel = mode === "off" ? "OFF" : mode === "dual" ? "NL+EN" : "EN";
+  // Show "OFF / AUTO+XX / XX" where XX is the target-language code. AUTO = the
+  // auto-detected source language Deepgram is picking up live.
+  const tCode = langCode(targetLang);
+  const modeLabel =
+    mode === "off" ? "OFF" : mode === "dual" ? `AUTO+${tCode}` : tCode;
 
   return (
     <div

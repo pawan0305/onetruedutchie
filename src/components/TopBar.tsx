@@ -4,12 +4,14 @@ import type { AudioLevel, DgStatus, Meeting, MeetingCost, SettingsView } from ".
 interface Props {
   meeting: Meeting | null;
   running: boolean;
+  paused: boolean;
   settings: SettingsView | null;
   audioLevel: AudioLevel;
   dgStatus: DgStatus;
   cost: MeetingCost | null;
   onStart: () => void;
   onStop: () => void;
+  onTogglePause: () => void;
   onOpenSettings: () => void;
   onOpenHistory: () => void;
   onRenameMeeting: (title: string) => void;
@@ -44,12 +46,14 @@ function VuBar({ value, color }: { value: number; color: string }) {
 export function TopBar({
   meeting,
   running,
+  paused,
   settings,
   audioLevel,
   dgStatus,
   cost,
   onStart,
   onStop,
+  onTogglePause,
   onOpenSettings,
   onOpenHistory,
   onRenameMeeting,
@@ -93,7 +97,12 @@ export function TopBar({
               title={running ? "click to rename" : ""}
             >
               {meeting.title}
-              {running && <span className="rec-dot" />}
+              {running && !paused && <span className="rec-dot" />}
+              {running && paused && (
+                <span className="paused-badge" title="Meeting is paused">
+                  ⏸ paused
+                </span>
+              )}
             </span>
           )
         ) : (
@@ -188,9 +197,22 @@ export function TopBar({
         )}
         <button onClick={onOpenHistory}>History</button>
         {running ? (
-          <button className="primary danger" onClick={onStop}>
-            ◼ Stop
-          </button>
+          <>
+            <button
+              className={paused ? "primary" : "ghost"}
+              onClick={onTogglePause}
+              title={
+                paused
+                  ? "Resume — bytes start flowing to Deepgram again"
+                  : "Pause — stop billing for Deepgram + Claude during a break"
+              }
+            >
+              {paused ? "▶ Resume" : "⏸ Pause"}
+            </button>
+            <button className="primary danger" onClick={onStop}>
+              ◼ Stop
+            </button>
+          </>
         ) : (
           <button
             className="primary"

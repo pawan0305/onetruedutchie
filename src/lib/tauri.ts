@@ -36,6 +36,8 @@ export const api = {
   startMeeting: (title?: string) =>
     invoke<Meeting>("start_meeting", { title }),
   stopMeeting: () => invoke<Meeting>("stop_meeting"),
+  setPaused: (paused: boolean) => invoke<boolean>("set_paused", { paused }),
+  isPaused: () => invoke<boolean>("is_paused"),
   currentMeeting: () => invoke<Meeting | null>("current_meeting"),
   setMeetingTitle: (title: string) =>
     invoke<void>("set_meeting_title", { title }),
@@ -71,6 +73,7 @@ export type EventHandlers = {
   "dg:status": DgStatusPayload;
   "audio:level": AudioLevel;
   "cost:update": MeetingCost;
+  "meeting:paused": { paused: boolean };
   error: { message: string };
 };
 
