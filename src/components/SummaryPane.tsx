@@ -2,9 +2,10 @@ interface Props {
   summary: string | null;
   updatedAt: string | null;
   onRegenerate?: () => void;
+  onCollapse?: () => void;
 }
 
-export function SummaryPane({ summary, updatedAt, onRegenerate }: Props) {
+export function SummaryPane({ summary, updatedAt, onRegenerate, onCollapse }: Props) {
   return (
     <section className="pane summary-pane">
       <header className="pane-header">
@@ -18,6 +19,11 @@ export function SummaryPane({ summary, updatedAt, onRegenerate }: Props) {
           {onRegenerate && (
             <button className="ghost" onClick={onRegenerate}>
               {summary ? "↻ regenerate" : "Generate"}
+            </button>
+          )}
+          {onCollapse && (
+            <button className="ghost" onClick={onCollapse} title="Collapse">
+              ◀
             </button>
           )}
         </div>

@@ -9,6 +9,7 @@ interface Props {
   showEnglish?: boolean;
   speakerNames?: Record<string, string>;
   onError?: (msg: string) => void;
+  onCollapse?: () => void;
 }
 
 function speakerLabel(
@@ -59,6 +60,7 @@ export function TranscriptPane({
   showEnglish = true,
   speakerNames,
   onError,
+  onCollapse,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -142,6 +144,11 @@ export function TranscriptPane({
             {copied === "en" ? "✓ copied" : "Copy EN"}
           </button>
           <span className="pane-sub">{segments.length} segments</span>
+          {onCollapse && (
+            <button className="ghost" onClick={onCollapse} title="Collapse">
+              ◀
+            </button>
+          )}
         </div>
       </header>
       <div className="pane-body scroll" ref={scrollRef} onScroll={onScroll}>

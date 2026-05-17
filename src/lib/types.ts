@@ -52,6 +52,7 @@ export interface MeetingSummaryRow {
   started_at: string;
   ended_at?: string | null;
   segment_count: number;
+  tags?: string[];
 }
 
 export type DgStatus = "connected" | "reconnecting" | "disconnected";

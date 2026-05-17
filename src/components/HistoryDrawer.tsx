@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../lib/tauri";
 import type { MeetingSummaryRow } from "../lib/types";
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
   onRename: (id: string, title: string) => void;
   onClose: () => void;
   onRefresh: () => void;
+  onError?: (msg: string) => void;
 }
 
 export function HistoryDrawer({
@@ -17,26 +19,49 @@ export function HistoryDrawer({
   onRename,
   onClose,
   onRefresh,
+  onError,
 }: Props) {
-  // Tracks which row is "armed" for delete (first click → "delete?",
-  // second click within 3s → actually deletes). Avoids the silent
-  // window.confirm() on Tauri webviews.
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
-  // Tracks which row is being renamed inline; null when nothing is editing.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+  const [tagsDraft, setTagsDraft] = useState("");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     onRefresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Disarm delete after 3s of inactivity.
   useEffect(() => {
     if (!armedDeleteId) return;
     const t = setTimeout(() => setArmedDeleteId(null), 3000);
     return () => clearTimeout(t);
   }, [armedDeleteId]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const inTitle = r.title.toLowerCase().includes(q);
+      const inTags = (r.tags ?? []).some((t) => t.toLowerCase().includes(q));
+      return inTitle || inTags;
+    });
+  }, [rows, query]);
+
+  const commitTags = async (id: string) => {
+    const tags = tagsDraft
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    setEditingTagsId(null);
+    try {
+      await api.setMeetingTags(id, tags);
+      onRefresh();
+    } catch (err) {
+      onError?.(`tags: ${err}`);
+    }
+  };
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
@@ -45,13 +70,24 @@ export function HistoryDrawer({
           <h2>Meeting history</h2>
           <button onClick={onClose}>✕</button>
         </header>
-        {rows.length === 0 && (
-          <div className="empty">No saved meetings yet.</div>
+        <div className="drawer-search">
+          <input
+            type="text"
+            placeholder="Search title or tag…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        {visible.length === 0 && (
+          <div className="empty">
+            {rows.length === 0 ? "No saved meetings yet." : "No matches."}
+          </div>
         )}
         <ul className="history-list">
-          {rows.map((r) => {
+          {visible.map((r) => {
             const armed = armedDeleteId === r.id;
             const renaming = renamingId === r.id;
+            const editingTags = editingTagsId === r.id;
             return (
               <li key={r.id}>
                 {renaming ? (
@@ -82,6 +118,39 @@ export function HistoryDrawer({
                       {new Date(r.started_at).toLocaleString()} ·{" "}
                       {r.segment_count} segments
                     </div>
+                    {editingTags ? (
+                      <input
+                        className="history-tags-input"
+                        autoFocus
+                        value={tagsDraft}
+                        onChange={(e) => setTagsDraft(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={() => commitTags(r.id)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Enter")
+                            (e.target as HTMLInputElement).blur();
+                          if (e.key === "Escape") setEditingTagsId(null);
+                        }}
+                        placeholder="tags, comma-separated"
+                      />
+                    ) : (
+                      <div
+                        className="history-tags"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTagsDraft((r.tags ?? []).join(", "));
+                          setEditingTagsId(r.id);
+                        }}
+                        title="Click to edit tags"
+                      >
+                        {(r.tags ?? []).length === 0
+                          ? <span className="muted">+ tags</span>
+                          : (r.tags ?? []).map((t) => (
+                              <span key={t} className="tag-pill">{t}</span>
+                            ))}
+                      </div>
+                    )}
                   </button>
                 )}
                 <button

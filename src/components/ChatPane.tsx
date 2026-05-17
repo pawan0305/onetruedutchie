@@ -7,6 +7,7 @@ interface Props {
   streamingText: string;
   disabled: boolean;
   onAsk: (q: string) => void;
+  onCollapse?: () => void;
 }
 
 export function ChatPane({
@@ -15,6 +16,7 @@ export function ChatPane({
   streamingText,
   disabled,
   onAsk,
+  onCollapse,
 }: Props) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -35,9 +37,16 @@ export function ChatPane({
     <section className="pane chat-pane">
       <header className="pane-header">
         <h2>Ask the meeting</h2>
-        <span className="pane-sub">
-          {disabled ? "no meeting loaded" : `${history.length} messages`}
-        </span>
+        <div className="pane-sub-row">
+          <span className="pane-sub">
+            {disabled ? "no meeting loaded" : `${history.length} messages`}
+          </span>
+          {onCollapse && (
+            <button className="ghost" onClick={onCollapse} title="Collapse">
+              ◀
+            </button>
+          )}
+        </div>
       </header>
       <div className="pane-body scroll" ref={scrollRef}>
         {history.length === 0 && !streamingId && (

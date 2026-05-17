@@ -13,6 +13,8 @@ pub struct MeetingSummaryRow {
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
     pub segment_count: usize,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 pub fn ensure_dir(dir: &Path) -> Result<()> {
@@ -68,6 +70,7 @@ pub fn list_meetings(dir: &Path) -> Result<Vec<MeetingSummaryRow>> {
                 started_at: m.started_at,
                 ended_at: m.ended_at,
                 segment_count: m.segments.len(),
+                tags: m.tags,
             }),
             Err(err) => {
                 tracing::warn!(?err, ?p, "skip malformed meeting file");

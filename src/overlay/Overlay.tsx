@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -73,6 +73,38 @@ export function Overlay() {
     });
     return () => {
       off.forEach((fn) => fn());
+    };
+  }, []);
+
+  // Persist overlay window position + size whenever the user drags or
+  // resizes it. Debounced so we don't write keys.json 60×/sec.
+  const saveTimer = useRef<number | null>(null);
+  useEffect(() => {
+    const win = getCurrentWebviewWindow();
+    const persist = async () => {
+      try {
+        const pos = await win.outerPosition();
+        const size = await win.outerSize();
+        await invoke("save_overlay_geometry", {
+          x: pos.x,
+          y: pos.y,
+          w: size.width,
+          h: size.height,
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+    const schedule = () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(persist, 400);
+    };
+    const off: UnlistenFn[] = [];
+    win.onMoved(schedule).then((u) => off.push(u));
+    win.onResized(schedule).then((u) => off.push(u));
+    return () => {
+      off.forEach((fn) => fn());
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
     };
   }, []);
 
