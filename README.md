@@ -1,187 +1,235 @@
 # OneTrueDutchie
 
-**Dutch → English live transcription, translation, and meeting assistant for macOS.**
+**Real-time meeting transcription, translation, and AI assistant for macOS.**
 
-Captures system audio from any app (Teams, Zoom, browser) via ScreenCaptureKit.
-Streams it to Deepgram Nova-2 for live Dutch STT, then uses Claude Haiku to
-translate each utterance, refresh a running summary every two minutes, and answer
-questions about the meeting via a chat panel.
+Built originally to translate Dutch standups into English. Now handles any
+language Deepgram can recognise, and translates / summarises into any
+language Claude can write. The name stuck.
 
-No backend. API keys stay in your macOS Keychain. Meetings are stored locally.
+- **Transcribe** any meeting (Teams, Zoom, Meet, in-person via mic, podcasts in the browser) in real time
+- **Translucent subtitle overlay** that floats above every other window, follows you across macOS Spaces, and is fully click-through
+- **Translate** every chunk into your target language as it happens
+- **Summarise** the whole meeting on demand
+- **Chat with the meeting** — ask Claude questions that use the full transcript as context
+- **Speaker diarization** with editable speaker names
+- **History** with search, tags, and drag-to-merge (combine recordings that should have been one meeting)
+- **Custom vocabulary** to boost recognition of names, jargon, and acronyms
+- **Audio level VU + cost meter** so you always know it's listening and what you've spent
+- 100% local: API keys live in `~/Library/Application Support`, transcripts are JSON files on disk, nothing else leaves your machine besides the calls to Deepgram and Anthropic.
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Clone
 git clone https://github.com/pawan0305/onetruedutchie.git
 cd onetruedutchie
-
-# 2. Build, sign, and install to /Applications (one command)
 bash scripts/install.sh
 ```
 
-Launch from Spotlight / Launchpad / `open /Applications/OneTrueDutchie.app`.
+That single script installs everything (Rust, npm deps, builds the Swift
+sidecar, signs the .app with a stable local cert so macOS TCC permissions
+stick), and drops `OneTrueDutchie.app` into `/Applications`.
 
-When the app opens:
-- Paste your **Deepgram** and **Anthropic** API keys in Settings.
-- Click **Start meeting**. Approve the Screen Recording + Microphone prompts.
-- Stop and restart the meeting once (macOS needs a fresh capture process after granting permissions).
-- Open Teams / Zoom in another window. Dutch speech shows up as NL + EN text in a couple of seconds.
+Launch it from Spotlight or `open /Applications/OneTrueDutchie.app`.
+
+On first launch:
+
+1. Settings → paste your **Deepgram** and **Anthropic** API keys
+2. Pick your **Target language** (default English)
+3. Start a meeting → grant Screen Recording + Microphone when prompted
+4. ⌘Q and relaunch (macOS only honours new TCC permissions on a fresh process)
+5. Start another meeting and you're live
 
 ---
 
-## API keys you need
+## API keys
 
-| Key | Where to get it | Cost for a 1h meeting |
-|-----|----------------|----------------------|
-| **Deepgram** | [console.deepgram.com](https://console.deepgram.com/) — free tier includes $200 credit | ~$0.26 (Nova-2, streaming) |
-| **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) — pay as you go | ~$0.07 (Haiku 4.5, incl. caching) |
+| Provider | Where | Cost per hour of meeting |
+|----------|-------|--------------------------|
+| **Deepgram** Nova-3 (multi-language streaming STT) | [console.deepgram.com](https://console.deepgram.com/) — $200 free trial | ≈$0.26 |
+| **Anthropic** Claude Haiku 4.5 (translation, summary, chat) | [console.anthropic.com](https://console.anthropic.com/) | ≈$0.07 |
 
-Total for a 1-hour meeting with light chat: **≈$0.35**.
+Roughly **$0.35 per hour** of meeting with light chat. Keys are stored in
+`~/Library/Application Support/com.onetruedutchie.app/keys.json` (chmod 600)
+and never leave your machine.
 
 ---
 
 ## Prerequisites
 
-| Tool | Minimum | How to install |
-|------|---------|----------------|
-| macOS | 13 Ventura | — |
-| Xcode CLT | any recent | `xcode-select --install` |
-| Rust | stable | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| Node.js | 20 | `brew install node` or `nvm install 22` |
-
-`bash scripts/setup.sh` checks for and installs Rust automatically. Node.js must be present first.
+| Tool | Min version |
+|------|------|
+| macOS | 13 Ventura |
+| Xcode Command Line Tools | any recent (`xcode-select --install`) |
+| Rust | stable (auto-installed by `setup.sh`) |
+| Node.js | 20+ (`brew install node` or `nvm install 22`) |
 
 ---
 
-## Manual step-by-step
+## Features in detail
 
-```bash
-# Install JS dependencies
-npm install
+### Translucent subtitle overlay
+A movie-style subtitle window that's always on top, click-through, and
+visible on every macOS Space. Each line gets a continuous rounded
+highlight (`box-decoration-break: clone`). When unlocked it shows a
+small floating control strip with mode toggle (`OFF / source+target /
+target only`), font size, lock, and hide buttons — no alt-tab to the
+main window mid-meeting.
 
-# Build the Swift sidecar (writes to src-tauri/binaries/)
-npm run build:swift
+### Multi-language
+Source language is auto-detected per utterance via Deepgram
+`language=multi` on Nova-3. Target language for translation, summary,
+and chat is set in Settings — pick from 20 common options or type any
+language Claude knows. Default English.
 
-# Dev mode (hot-reload frontend, real Rust backend)
-npm run tauri dev
-```
+### Drag-to-merge history
+If you stopped a recording and started a new one in the middle of the
+same in-person meeting, grab the `⋮⋮` handle next to one history row
+and drop it onto another. Segments, chat, notes, and tags from both
+recordings are combined and re-sorted by timestamp — the merged
+transcript reads chronologically.
+
+### Speaker diarization
+Deepgram acoustic diarization labels speakers 0/1/2/… Click the label
+in the transcript to rename them ("Maria", "Sales lead"). Hidden
+automatically for solo meetings where everything is speaker 0.
+
+### Custom vocabulary
+Settings → Custom vocabulary. One term per line. Boosts these via
+Deepgram Nova-3 `keyterm=` — useful for colleague names, project
+codenames, and technical jargon.
+
+### Auto-reconnect
+A `tokio::sync::broadcast` channel fans out the live audio so if the
+Deepgram WebSocket drops mid-meeting, we transparently reconnect (with
+exponential backoff) and the audio sidecar keeps running. A coloured
+dot in the top bar shows connection state.
+
+### Cost & audio level meters
+Top bar shows running per-meeting cost (Deepgram seconds + Anthropic
+tokens parsed from each response's `Usage` block) and two VU bars (mic
++ system audio) so you can see at a glance that audio is actually
+flowing.
+
+### Notes pane + collapsible sections
+Each meeting has a freeform notes textarea (debounced autosave) for
+your own observations alongside the AI-generated content. Any pane
+(Transcript / Summary / Chat / Notes) can be collapsed to a vertical
+strip so you can give the active one more room.
 
 ---
 
-## Build a distributable .app
-
-```bash
-npm run build:swift
-npm run tauri build
-
-# Patch macOS permission descriptions into the bundled .app
-bash scripts/inject-infoplist.sh
-```
-
-Output: `src-tauri/target/release/bundle/macos/OneTrueDutchie.app`
-
----
-
-## What's inside
+## Architecture
 
 ```
                 ┌─────────────────────────────────┐
-                │   Tauri window (React + TS)      │
+                │   Tauri main window (React)      │
                 │   TopBar │ Transcript │ Summary  │
-                │   Chat   │ History               │
+                │   Chat   │ Notes      │ History  │
                 └──────────────────┬───────────────┘
                                    │ Tauri events / invoke
                                    ▼
+   ┌──────────────────────────────────────────────────┐
+   │  Tauri overlay window (React, transparent)       │
+   │  Subtitles + controls when unlocked              │
+   └──────────────────────────────────────────────────┘
+                                   ▲
+                                   │
    ┌──────────────────────────────────────────────────┐
    │  Rust core (src-tauri/src/)                      │
    │   commands.rs   ← meeting orchestrator           │
    │   audio.rs      ← spawns Swift sidecar           │
    │   deepgram.rs   ← live STT WebSocket             │
    │   anthropic.rs  ← translate / summarise / chat   │
-   │   settings.rs   ← Keychain storage               │
-   │   storage.rs    ← per-meeting JSON files          │
+   │   settings.rs   ← keys.json on disk              │
+   │   storage.rs    ← per-meeting JSON files         │
    └──────────────────────┬───────────────────────────┘
                           │ raw 16 kHz mono Int16 PCM via stdout
                           ▼
    ┌─────────────────────────────────────────────────┐
-   │  Swift sidecar  (swift-audio/)                  │
+   │  Swift sidecar  (swift-audio/)                   │
    │  ScreenCaptureKit  → all system audio            │
-   │  AVAudioEngine     → microphone                 │
-   │  AVAudioConverter  → 16 kHz mono Int16 LE       │
+   │  AVAudioEngine     → microphone                  │
+   │  AVAudioConverter  → 16 kHz mono Int16 LE        │
    └─────────────────────────────────────────────────┘
 ```
 
-**Flow for one Dutch utterance:**
+**Flow for one utterance:**
 
-1. Swift sidecar captures PCM → Rust reads stdout chunks
-2. Rust streams bytes over WebSocket to **Deepgram Nova-2** (`nl`, `nova-2`, `interim_results=true`)
-3. Deepgram emits interim results → UI shows live Dutch text (pending)
-4. On `speech_final` → segment is committed → background task calls **Claude Haiku** to translate
-5. English text fills in alongside Dutch, usually within 1–2 s
-6. Every 2 minutes → Claude re-summarises the full transcript
-7. Chat pane streams answers with the transcript as a cached prefix (cheap follow-ups)
+1. Swift sidecar captures PCM from system audio (ScreenCaptureKit) and
+   microphone (AVAudioEngine), mixes them sample-aligned, converts to
+   16 kHz mono Int16
+2. Rust reads chunks from stdin and broadcasts to one or more consumers
+3. Deepgram WebSocket consumer streams audio to Nova-3 with
+   `language=multi`, `diarize=true`, `keyterm=<your vocab>`
+4. Interim text shows up as `segment:pending` events on the overlay and
+   transcript pane
+5. On is_final the segment is committed — a background task calls
+   Claude Haiku to translate the chunk into your target language
+6. Translation arrives 1–2 s later, fills in next to the source text
+7. Summary / chat calls send the running transcript with prompt
+   caching (`cache_control: ephemeral`) so follow-up calls are cheap
+
+---
+
+## Manual dev workflow
+
+```bash
+# JS deps
+npm install
+
+# Build the Swift sidecar → src-tauri/binaries/
+npm run build:swift
+
+# Dev mode (hot-reload frontend, real Rust backend)
+npm run tauri dev
+```
+
+To build a distributable .app instead:
+
+```bash
+bash scripts/install.sh
+```
 
 ---
 
 ## Permissions (macOS)
 
-The app needs two TCC permissions:
-
 | Permission | Why |
 |-----------|-----|
-| **Screen Recording** | ScreenCaptureKit uses this to capture system audio from other apps |
-| **Microphone** | Optional mic capture (your own voice into Teams etc.) |
+| **Screen Recording** | ScreenCaptureKit captures system audio from other apps |
+| **Microphone** | Optional mic capture (your own voice) |
 
-Grant them via **System Settings → Privacy & Security** after first launch. If the permission prompt appears under a different name (`cargo`, `onetruedutchie`) — that's the dev binary. Grant it there.
-
-After granting, stop and restart the meeting once — macOS only honours new permissions on the next launch of the capture process.
-
----
-
-## UI tour
-
-| Pane | What it does |
-|------|-------------|
-| **Transcript** | Dutch (orange) + English (blue) side by side. Interim text shows live in faded style; turns solid when finalised. |
-| **Summary** | Auto-refreshes every 2 minutes. Hit ↻ to force a refresh. Uses bullets for Decisions / Action items / Open questions. |
-| **Ask the meeting** | Chat with Claude about what was discussed. The full transcript is sent as a prompt-cached prefix so follow-up questions are fast. |
-| **History** | List of all saved meetings. Click to load a past meeting and chat with it even while a new one is recording. |
-
----
-
-## Tuning
-
-| Thing to change | Where |
-|----------------|-------|
-| Summary refresh interval | `src-tauri/src/commands.rs` → `tokio::time::interval(Duration::from_secs(120))` |
-| Deepgram endpointing (silence threshold) | `src-tauri/src/deepgram.rs` → `endpointing=300` and `utterance_end_ms=1000` |
-| Disable microphone capture | `src-tauri/src/commands.rs` → `audio::start_capture(..., include_mic: false)` |
-| Use Sonnet instead of Haiku | `src-tauri/src/anthropic.rs` → change `MODEL_HAIKU` |
+Grant via System Settings → Privacy & Security after first launch. TCC
+permissions are bound to the binary's cdhash; `scripts/install.sh`
+creates a stable self-signed certificate so the same permissions stick
+across rebuilds.
 
 ---
 
 ## Troubleshooting
 
-**"audio sidecar not found"**
-→ Run `npm run build:swift`. The Swift binary must exist in `src-tauri/binaries/` before running the app.
-
 **No transcript appears after starting**
-→ Check Screen Recording permission. If missing, add it in System Settings → Privacy & Security → Screen Recording. Then fully quit the app and relaunch.
+Check Screen Recording permission. Add it in System Settings → Privacy
+& Security → Screen Recording. Then ⌘Q the app and relaunch.
 
-**Transcript appears but no English translation**
-→ Your Anthropic key is wrong or has no credit. Re-enter it in Settings.
+**Transcript appears but no translation**
+Your Anthropic key is wrong, has no credit, or `translate` is toggled
+off (top bar 🌐 button). Re-check Settings and the toggle.
 
-**Translation lags far behind**
-→ Lower the `endpointing` value in `deepgram.rs` (e.g. `200` ms instead of `300`) so utterances finalise sooner.
+**Subtitle overlay window is opaque gray**
+Make sure you're running from `/Applications/OneTrueDutchie.app`
+(properly signed and bundled), not `npm run tauri dev`. Transparent
+overlays require `macOSPrivateApi: true` + the `macos-private-api`
+Cargo feature, both of which the bundled .app has.
 
 **"Deepgram connection closed" error**
-→ Deepgram key is invalid. Re-enter in Settings.
+Deepgram key is invalid or out of credit. Re-enter in Settings.
 
 **The app asks for permissions, I grant them, but it still doesn't capture**
-→ Stop the meeting, quit the app fully (`⌘Q`), relaunch, and start a new meeting.
+Stop the meeting, ⌘Q the app, relaunch, start a new meeting. macOS
+only honours new TCC permissions on a fresh process.
 
 ---
 
@@ -190,38 +238,66 @@ After granting, stop and restart the meeting once — macOS only honours new per
 ```
 onetruedutchie/
 ├── src/                         React + TypeScript frontend
-│   ├── App.tsx                  Root component + Tauri event subscriptions
+│   ├── App.tsx                  Root + Tauri event subscriptions
 │   ├── styles.css               Dark theme
 │   ├── lib/
 │   │   ├── tauri.ts             Typed invoke() + listen() wrappers
 │   │   └── types.ts             Shared TS interfaces
-│   └── components/
-│       ├── TopBar.tsx           Start/Stop, title editor, settings button
-│       ├── TranscriptPane.tsx   Live Dutch + English segments
-│       ├── SummaryPane.tsx      Auto-refreshing summary
-│       ├── ChatPane.tsx         Streaming chat Q&A
-│       ├── SettingsModal.tsx    API key entry
-│       └── HistoryDrawer.tsx    Past meetings list
+│   ├── components/
+│   │   ├── TopBar.tsx           Start/Stop, dg-status, VU, cost
+│   │   ├── TranscriptPane.tsx   Live transcript + speaker labels
+│   │   ├── SummaryPane.tsx
+│   │   ├── ChatPane.tsx         Streaming chat
+│   │   ├── NotesPane.tsx        Debounced notes textarea
+│   │   ├── SettingsModal.tsx    Keys, vocab, target language
+│   │   ├── HistoryDrawer.tsx    Past meetings + drag-to-merge
+│   │   └── Splitter.tsx         Resizable pane divider
+│   └── overlay/
+│       ├── Overlay.tsx          Subtitle overlay + control strip
+│       └── overlay.css
 ├── src-tauri/
 │   ├── src/
-│   │   ├── lib.rs               Tauri builder + plugin setup
+│   │   ├── lib.rs               Tauri builder
 │   │   ├── commands.rs          IPC commands + meeting orchestrator
-│   │   ├── audio.rs             Spawn Swift sidecar, pipe PCM chunks
-│   │   ├── deepgram.rs          Deepgram WebSocket streaming client
-│   │   ├── anthropic.rs         Claude API: translate / summarise / chat SSE
-│   │   ├── settings.rs          Keychain-backed API key storage
+│   │   ├── audio.rs             Swift sidecar process + VU events
+│   │   ├── deepgram.rs          Deepgram WebSocket client
+│   │   ├── anthropic.rs         Claude Haiku translate/summary/chat
+│   │   ├── settings.rs          keys.json on disk
 │   │   ├── storage.rs           Per-meeting JSON file persistence
-│   │   └── state.rs             Meeting / Segment / ChatMessage model
-│   ├── Info.plist               NS*UsageDescription strings
-│   ├── tauri.conf.json
-│   └── capabilities/
-│       └── default.json
+│   │   └── state.rs             Meeting / Segment / Chat / Cost model
+│   ├── Info.plist               NSScreenCaptureUsageDescription etc.
+│   ├── tauri.conf.json          Two windows: main + overlay
+│   └── capabilities/default.json
 ├── swift-audio/
 │   ├── Package.swift
-│   ├── build.sh                 Compiles sidecar → src-tauri/binaries/
-│   └── Sources/AudioCapture/
-│       └── main.swift           ScreenCaptureKit + AVAudioEngine sidecar
+│   ├── build.sh                 Builds sidecar → src-tauri/binaries/
+│   └── Sources/AudioCapture/main.swift
 └── scripts/
-    ├── setup.sh                 One-shot first-time setup
-    └── inject-infoplist.sh      Patches .app bundle Info.plist post-build
+    ├── install.sh               One-shot build + sign + install
+    ├── setup.sh                 Install Rust + JS deps
+    ├── setup-cert.sh            Create stable self-signed cert
+    └── inject-infoplist.sh      Patch Info.plist post-build
 ```
+
+---
+
+## Contributing
+
+PRs welcome. The fastest way to get oriented is:
+
+1. `bash scripts/install.sh` — verify your build works
+2. `npm run tauri dev` — hot-reload dev mode
+3. Look at `src-tauri/src/commands.rs::run_meeting` for the main loop
+
+If you want to add support for a new feature (new transcription
+provider, different overlay style, etc.), open an issue first so we
+can talk through the design.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The name "OneTrueDutchie" is just a name — the project translates from
+and to any language, not just Dutch.
