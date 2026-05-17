@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/tauri";
 import type { Segment } from "../lib/types";
 
 interface Props {
@@ -17,34 +16,48 @@ function fmtTime(iso: string): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function TranscriptPane({ segments, pendingId, meetingId, showEnglish = true }: Props) {
+/** Source-language transcript: one line per finalised segment, no timestamps. */
+function buildDutchTranscript(segments: Segment[]): string {
+  return segments
+    .filter((s) => s.is_final)
+    .map((s) => s.dutch.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+/** English transcript built from the per-chunk translations that have
+ *  already been computed live. Falls back to the source text for segments
+ *  where translation was disabled (or where the segment was already
+ *  English so `english === dutch`). Instant — no Claude round-trip. */
+function buildEnglishTranscript(segments: Segment[]): string {
+  return segments
+    .filter((s) => s.is_final)
+    .map((s) => (s.english ?? s.dutch).trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+type CopyKind = "nl" | "en";
+
+export function TranscriptPane({ segments, pendingId, showEnglish = true }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
-  const [copyState, setCopyState] = useState<"idle" | "translating" | "copied" | "error">("idle");
+  const [copied, setCopied] = useState<CopyKind | null>(null);
 
-  const onCopy = async () => {
-    if (segments.filter((s) => s.is_final).length === 0) return;
-    setCopyState("translating");
+  const doCopy = async (kind: CopyKind) => {
+    const text =
+      kind === "nl"
+        ? buildDutchTranscript(segments)
+        : buildEnglishTranscript(segments);
+    if (!text) return;
     try {
-      const text = await api.exportEnglishTranscript(meetingId);
-      if (!text.trim()) {
-        setCopyState("idle");
-        return;
-      }
       await navigator.clipboard.writeText(text);
-      setCopyState("copied");
-      setTimeout(() => setCopyState("idle"), 1500);
+      setCopied(kind);
+      setTimeout(() => setCopied((c) => (c === kind ? null : c)), 1500);
     } catch {
-      setCopyState("error");
-      setTimeout(() => setCopyState("idle"), 2000);
+      /* clipboard blocked */
     }
   };
-
-  const copyLabel =
-    copyState === "translating" ? "translating…"
-    : copyState === "copied" ? "✓ copied"
-    : copyState === "error" ? "× failed"
-    : "Copy EN";
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -61,6 +74,8 @@ export function TranscriptPane({ segments, pendingId, meetingId, showEnglish = t
     stickToBottomRef.current = atBottom;
   };
 
+  const hasFinal = segments.some((s) => s.is_final);
+
   return (
     <section className="pane transcript-pane">
       <header className="pane-header">
@@ -68,11 +83,19 @@ export function TranscriptPane({ segments, pendingId, meetingId, showEnglish = t
         <div className="pane-sub-row">
           <button
             className="ghost"
-            onClick={onCopy}
-            disabled={segments.length === 0 || copyState === "translating"}
-            title="Translate the full transcript and copy to clipboard"
+            onClick={() => doCopy("nl")}
+            disabled={!hasFinal}
+            title="Copy the raw source-language transcript"
           >
-            {copyLabel}
+            {copied === "nl" ? "✓ copied" : "Copy NL"}
+          </button>
+          <button
+            className="ghost"
+            onClick={() => doCopy("en")}
+            disabled={!hasFinal}
+            title="Copy the live English transcript (per-chunk translations, instant)"
+          >
+            {copied === "en" ? "✓ copied" : "Copy EN"}
           </button>
           <span className="pane-sub">{segments.length} segments</span>
         </div>

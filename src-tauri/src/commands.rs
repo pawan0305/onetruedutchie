@@ -604,7 +604,13 @@ async fn run_meeting(
 /// Stability window — once a piece of text has appeared in interims for at
 /// least this long, we anchor it. Anchored text never gets dropped from the
 /// segment, even if a later interim from Deepgram doesn't include it.
-const ANCHOR_STABILITY: std::time::Duration = std::time::Duration::from_millis(250);
+///
+/// Set to 0: anchor immediately on first sight. Anything Deepgram once
+/// emitted as an interim is treated as "happened" and never disappears
+/// from this chunk. False positives (Deepgram noise being kept) are
+/// preferable to false negatives (losing real spoken content) for the
+/// hyper-live use case.
+const ANCHOR_STABILITY: std::time::Duration = std::time::Duration::from_millis(0);
 
 /// Min overlap (in bytes) between the anchored suffix and a diverging new
 /// interim's prefix to count as a continuation rather than a duplication.
