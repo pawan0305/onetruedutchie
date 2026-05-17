@@ -2,6 +2,32 @@ import { useState } from "react";
 import { api } from "../lib/tauri";
 import type { SettingsView } from "../lib/types";
 
+// Curated short list of common Claude output languages. Users can type
+// anything they want via the "Other…" option, but these cover ~95% of
+// cases without scrolling through a hundred locales.
+const LANG_OPTIONS = [
+  "English",
+  "Dutch",
+  "Spanish",
+  "French",
+  "German",
+  "Italian",
+  "Portuguese",
+  "Polish",
+  "Russian",
+  "Ukrainian",
+  "Turkish",
+  "Arabic",
+  "Hindi",
+  "Chinese (Simplified)",
+  "Chinese (Traditional)",
+  "Japanese",
+  "Korean",
+  "Indonesian",
+  "Vietnamese",
+  "Thai",
+];
+
 interface Props {
   settings: SettingsView | null;
   onSave: (deepgram: string, anthropic: string) => Promise<void> | void;
@@ -19,6 +45,12 @@ export function SettingsModal({ settings, onSave, onSettingsChanged, onClose, on
     (settings?.keywords ?? []).join("\n"),
   );
   const [savingVocab, setSavingVocab] = useState(false);
+  // Target language for Claude (translation/summary/chat). Source is
+  // auto-detected by Deepgram.
+  const [targetLang, setTargetLang] = useState<string>(
+    settings?.target_language || "English",
+  );
+  const [savingLang, setSavingLang] = useState(false);
 
   const submit = async () => {
     setSaving(true);
@@ -26,6 +58,19 @@ export function SettingsModal({ settings, onSave, onSettingsChanged, onClose, on
       await onSave(dg, an);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveLang = async (next: string) => {
+    setTargetLang(next);
+    setSavingLang(true);
+    try {
+      const s = await api.setTargetLanguage(next);
+      onSettingsChanged(s);
+    } catch (err) {
+      onError(`language: ${err}`);
+    } finally {
+      setSavingLang(false);
     }
   };
 
@@ -103,6 +148,41 @@ export function SettingsModal({ settings, onSave, onSettingsChanged, onClose, on
               console.anthropic.com
             </a>{" "}
             · Claude Haiku 4.5 ($1/MTok in, $5/MTok out)
+          </small>
+        </label>
+
+        <label>
+          <span>
+            Target language
+            <em className="muted"> (translation, summary, chat output)</em>
+          </span>
+          <select
+            value={LANG_OPTIONS.includes(targetLang) ? targetLang : "__custom"}
+            onChange={(e) => {
+              if (e.target.value === "__custom") return;
+              saveLang(e.target.value);
+            }}
+            disabled={savingLang}
+          >
+            {LANG_OPTIONS.map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
+            <option value="__custom">Other…</option>
+          </select>
+          {(!LANG_OPTIONS.includes(targetLang) || targetLang === "") && (
+            <input
+              type="text"
+              value={targetLang}
+              onChange={(e) => setTargetLang(e.target.value)}
+              onBlur={() => saveLang(targetLang)}
+              placeholder="e.g. Vietnamese, Brazilian Portuguese"
+              style={{ marginTop: 6 }}
+              autoComplete="off"
+            />
+          )}
+          <small>
+            Source language is auto-detected. This sets the language Claude
+            translates / summarises into. Takes effect on the next call.
           </small>
         </label>
 

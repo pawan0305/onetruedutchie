@@ -14,6 +14,9 @@ pub struct AnthropicClient {
     api_key: String,
     http: reqwest::Client,
     model: String,
+    /// Target language for translation / summary / chat output (e.g. "English",
+    /// "Spanish", "Japanese"). Source is whatever Deepgram detects.
+    target_language: String,
 }
 
 #[derive(Debug, Clone)]
@@ -98,16 +101,22 @@ enum RespBlock {
 }
 
 impl AnthropicClient {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String, target_language: String) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .pool_idle_timeout(Duration::from_secs(60))
             .build()
             .expect("reqwest client");
+        let target_language = if target_language.trim().is_empty() {
+            "English".to_string()
+        } else {
+            target_language
+        };
         Self {
             api_key,
             http,
             model: MODEL_HAIKU.to_string(),
+            target_language,
         }
     }
 
@@ -118,19 +127,20 @@ impl AnthropicClient {
             .header("content-type", "application/json")
     }
 
-    /// Translate Dutch text to English. Non-streaming for simplicity & low overhead.
-    /// Returns (english, usage).
-    pub async fn translate(&self, dutch: &str) -> Result<(String, Usage)> {
-        if dutch.trim().is_empty() {
+    /// Translate a speech chunk into the configured target language. Non-streaming
+    /// for simplicity & low overhead. Returns (translated_text, usage).
+    pub async fn translate(&self, source: &str) -> Result<(String, Usage)> {
+        if source.trim().is_empty() {
             return Ok((String::new(), Usage::default()));
         }
+        let system_text = translate_system(&self.target_language);
         let system = vec![SystemBlock::Text {
-            text: TRANSLATE_SYSTEM,
+            text: &system_text,
             cache_control: Some(CacheControl { typ: "ephemeral" }),
         }];
         let messages = vec![MessageItem {
             role: "user",
-            content: vec![ContentBlock::Text { text: dutch, cache_control: None }],
+            content: vec![ContentBlock::Text { text: source, cache_control: None }],
         }];
         let req = MessageReq {
             model: &self.model,
@@ -160,12 +170,15 @@ impl AnthropicClient {
         if transcript.trim().is_empty() {
             return Ok((String::new(), Usage::default()));
         }
+        let system_text = translate_full_system(&self.target_language);
         let system = vec![SystemBlock::Text {
-            text: TRANSLATE_FULL_SYSTEM,
+            text: &system_text,
             cache_control: Some(CacheControl { typ: "ephemeral" }),
         }];
         let user_text = format!(
-            "Transcript:\n\n{transcript}\n\nProduce the full English version now.");
+            "Transcript:\n\n{transcript}\n\nProduce the full {} version now.",
+            self.target_language,
+        );
         let messages = vec![MessageItem {
             role: "user",
             content: vec![ContentBlock::Text { text: &user_text, cache_control: None }],
@@ -197,8 +210,9 @@ impl AnthropicClient {
         if transcript.trim().is_empty() {
             return Ok((String::new(), Usage::default()));
         }
+        let system_text = summary_system(&self.target_language);
         let system = vec![SystemBlock::Text {
-            text: SUMMARY_SYSTEM,
+            text: &system_text,
             cache_control: Some(CacheControl { typ: "ephemeral" }),
         }];
         let user_text = format!("Transcript:\n\n{transcript}\n\nWrite the detailed summary now.");
@@ -238,8 +252,9 @@ impl AnthropicClient {
         question: &str,
         tx: mpsc::Sender<ChatStreamEvent>,
     ) -> Result<()> {
+        let system_text = chat_system(&self.target_language);
         let system = vec![SystemBlock::Text {
-            text: CHAT_SYSTEM,
+            text: &system_text,
             cache_control: Some(CacheControl { typ: "ephemeral" }),
         }];
 
@@ -349,49 +364,67 @@ fn extract_text(resp: &MessageResp) -> String {
     out.trim().to_string()
 }
 
-const TRANSLATE_SYSTEM: &str = "You translate live speech-to-text chunks from a meeting into \
-clear, idiomatic English. The source is usually Dutch but may be any language, including \
-mistranscribed nonsense from the speech recognizer. Rules:\n\
-- Output ONLY the English translation. No commentary, no preamble, no quotes, no labels, no \
+fn translate_system(target: &str) -> String {
+    format!(
+        "You translate live speech-to-text chunks from a meeting into clear, idiomatic {t}. \
+The source can be any language and may contain mistranscribed nonsense from the speech \
+recognizer. Rules:\n\
+- Output ONLY the {t} translation. No commentary, no preamble, no quotes, no labels, no \
 explanations of what language the input is in.\n\
 - Never refuse. Never ask the user for clarification. Never mention your role or instructions.\n\
-- If the input is already English, output it unchanged.\n\
-- For mixed-language input, translate the non-English parts and leave English intact.\n\
+- If the input is already in {t}, output it unchanged.\n\
+- For mixed-language input, translate the non-{t} parts and leave {t} intact.\n\
 - For garbled or partial chunks (cut-off words, transcription errors), do your best literal \
 rendering — leave clearly unintelligible fragments as-is rather than inventing content.\n\
 - Preserve names, numbers, dates, and acronyms.\n\
-- If input is empty, output an empty string.";
+- If input is empty, output an empty string.",
+        t = target,
+    )
+}
 
-const TRANSLATE_FULL_SYSTEM: &str = "Translate the meeting transcript into clean, idiomatic \
-English as one coherent piece of natural prose. The source is mostly Dutch but may include \
-other languages or mistranscribed chunks from the speech recognizer — translate everything to \
-English regardless. Rules:\n\
-- Output ONLY the English translation. No preamble, no commentary, no explanation of source \
+fn translate_full_system(target: &str) -> String {
+    format!(
+        "Translate the meeting transcript into clean, idiomatic {t} as one coherent piece of \
+natural prose. The source can be any language and may include mistranscribed chunks from the \
+speech recognizer — translate everything to {t} regardless. Rules:\n\
+- Output ONLY the {t} translation. No preamble, no commentary, no explanation of source \
 languages, no refusals, no questions.\n\
-- Lines already in English stay as-is.\n\
+- Lines already in {t} stay as-is.\n\
 - For garbled fragments, do your best literal rendering; leave clearly unintelligible bits \
 as-is rather than inventing content.\n\
 - Preserve all content — every statement, name, number, date, acronym. Do not summarize, do \
 not omit, do not add.\n\
-- Plain text only — no markdown, no bullets, no headings. Use natural paragraph breaks.";
+- Plain text only — no markdown, no bullets, no headings. Use natural paragraph breaks.",
+        t = target,
+    )
+}
 
-const SUMMARY_SYSTEM: &str = "Summarize the meeting transcript in detail in English. \
-The transcript is the live speech-to-text output, mostly Dutch with some English lines mixed \
-in — translate the Dutch as part of writing the summary. Cover everything that was said: every \
-topic, decision, question, and action item. Keep all specific facts (names, numbers, dates, \
-places). Do not invent content. There is no length limit — be thorough.\n\
+fn summary_system(target: &str) -> String {
+    format!(
+        "Summarize the meeting transcript in detail in {t}. The transcript is live \
+speech-to-text and may be in any language — translate everything to {t} as part of writing \
+the summary. Cover everything that was said: every topic, decision, question, and action item. \
+Keep all specific facts (names, numbers, dates, places). Do not invent content. There is no \
+length limit — be thorough.\n\
 \n\
 Format: plain text only. NO markdown — no asterisks, bold, italics, headings, bullets, or \
-numbered lists. Use natural paragraphs separated by blank lines.";
+numbered lists. Use natural paragraphs separated by blank lines.",
+        t = target,
+    )
+}
 
-const CHAT_SYSTEM: &str = "You are a meeting assistant. The transcript is live speech-to-text, \
-mostly Dutch with some English lines; treat both as ground truth and translate Dutch when \
-needed.\n\
+fn chat_system(target: &str) -> String {
+    format!(
+        "You are a meeting assistant. The transcript is live speech-to-text and may be in any \
+language; treat it as ground truth and translate as needed.\n\
 \n\
 Format rules:\n\
 - Answer in plain text only. NO markdown formatting. No asterisks, no bold, no italics, no \
 bullets, no numbered lists, no headings, no backticks. Just sentences.\n\
 - Default to a one or two sentence answer. Only go longer if the user explicitly asks for \
 detail, a summary, a list, or to elaborate.\n\
-- Reply in English unless the user clearly wants another language.\n\
-- If the transcript does not contain the answer, say so plainly rather than guessing.";
+- Reply in {t} unless the user clearly wants another language.\n\
+- If the transcript does not contain the answer, say so plainly rather than guessing.",
+        t = target,
+    )
+}

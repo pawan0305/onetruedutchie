@@ -23,6 +23,8 @@ export const api = {
     invoke<SettingsView>("set_overlay_locked", { locked }),
   setVocab: (words: string[]) =>
     invoke<SettingsView>("set_vocab", { words }),
+  setTargetLanguage: (language: string) =>
+    invoke<SettingsView>("set_target_language", { language }),
   saveOverlayGeometry: (x: number, y: number, w: number, h: number) =>
     invoke<void>("save_overlay_geometry", { x, y, w, h }),
   setMeetingNotes: (id: string | undefined, notes: string) =>

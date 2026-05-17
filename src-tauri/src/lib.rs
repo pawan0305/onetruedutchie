@@ -90,6 +90,7 @@ pub fn run() {
             commands::set_overlay_font_size,
             commands::set_overlay_locked,
             commands::set_vocab,
+            commands::set_target_language,
             commands::save_overlay_geometry,
             commands::set_meeting_notes,
             commands::set_meeting_tags,

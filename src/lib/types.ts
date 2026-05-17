@@ -44,6 +44,7 @@ export interface SettingsView {
   overlay_font_size: number;
   overlay_locked: boolean;
   keywords: string[];
+  target_language: string;
 }
 
 export interface MeetingSummaryRow {

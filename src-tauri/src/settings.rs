@@ -36,6 +36,12 @@ pub struct ApiKeys {
     pub overlay_w: Option<u32>,
     #[serde(default)]
     pub overlay_h: Option<u32>,
+    /// Target language for Claude (translation, summary, chat). The source
+    /// language is auto-detected by Deepgram. Stored as a human-readable
+    /// language name ("English", "Spanish", "Japanese"…) so it drops
+    /// straight into the prompts. Default "English".
+    #[serde(default = "default_target_language")]
+    pub target_language: String,
 }
 
 impl Default for ApiKeys {
@@ -52,6 +58,7 @@ impl Default for ApiKeys {
             overlay_y: None,
             overlay_w: None,
             overlay_h: None,
+            target_language: default_target_language(),
         }
     }
 }
@@ -60,6 +67,7 @@ fn default_translate() -> bool { true }
 fn default_overlay() -> String { "off".to_string() }
 fn default_overlay_size() -> u32 { 24 }
 fn default_overlay_locked() -> bool { true }
+fn default_target_language() -> String { "English".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsView {
@@ -70,6 +78,7 @@ pub struct SettingsView {
     pub overlay_font_size: u32,
     pub overlay_locked: bool,
     pub keywords: Vec<String>,
+    pub target_language: String,
 }
 
 /// ~/Library/Application Support/com.onetruedutchie.app/keys.json
@@ -99,7 +108,25 @@ pub fn settings_view() -> Result<SettingsView> {
         overlay_font_size: keys.overlay_font_size,
         overlay_locked: keys.overlay_locked,
         keywords: keys.keywords.clone(),
+        target_language: keys.target_language.clone(),
     })
+}
+
+pub fn read_target_language() -> String {
+    read_keys()
+        .map(|k| k.target_language)
+        .unwrap_or_else(|_| "English".into())
+}
+
+pub fn set_target_language(lang: &str) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    let trimmed = lang.trim();
+    keys.target_language = if trimmed.is_empty() {
+        "English".into()
+    } else {
+        trimmed.to_string()
+    };
+    write_keys_back(&keys)
 }
 
 pub fn read_keywords() -> Vec<String> {

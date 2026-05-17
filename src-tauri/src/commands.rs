@@ -85,6 +85,15 @@ pub async fn set_vocab(words: Vec<String>) -> Result<SettingsView, String> {
     settings::settings_view().map_err(|e| e.to_string())
 }
 
+/// Set the target language Claude uses for translation, summary, and chat.
+/// Source language is auto-detected by Deepgram. Takes effect on the next
+/// translation / summary / chat call (no restart needed).
+#[tauri::command]
+pub async fn set_target_language(language: String) -> Result<SettingsView, String> {
+    settings::set_target_language(&language).map_err(|e| e.to_string())?;
+    settings::settings_view().map_err(|e| e.to_string())
+}
+
 /// Persist the overlay window position + size so it doesn't reset on restart.
 #[tauri::command]
 pub async fn save_overlay_geometry(x: i32, y: i32, w: u32, h: u32) -> Result<(), String> {
@@ -361,7 +370,7 @@ pub async fn export_english_transcript(
     state: State<'_, Arc<AppState>>,
 ) -> Result<String, String> {
     let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
-    let claude = AnthropicClient::new(an_key);
+    let claude = AnthropicClient::new(an_key, settings::read_target_language());
 
     let transcript = if let Some(meeting_id) = id {
         // Prefer the live meeting if the id matches; otherwise load from disk.
@@ -524,7 +533,7 @@ pub async fn regenerate_summary(
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     let an_key = settings::require_anthropic().map_err(|e| e.to_string())?;
-    let claude = AnthropicClient::new(an_key);
+    let claude = AnthropicClient::new(an_key, settings::read_target_language());
     let app_state = state.inner().clone();
 
     // Decide which meeting we're summarizing: the live one if `id` matches
@@ -666,7 +675,7 @@ pub async fn ask_question(
 
     let stream_id = Uuid::new_v4();
     let app_state = state.inner().clone();
-    let claude = AnthropicClient::new(an_key);
+    let claude = AnthropicClient::new(an_key, settings::read_target_language());
 
     // Snapshot transcript & history for the request. Source-language only —
     // Claude reads Dutch fine, and feeding the choppy per-chunk translations
@@ -859,7 +868,7 @@ async fn run_meeting(
     // Need a Clone of DeepgramConfig so the loop can clone per attempt.
     // (Clone derived below in the type; nothing to do here.)
 
-    let claude = Arc::new(AnthropicClient::new(an_key));
+    let claude = Arc::new(AnthropicClient::new(an_key, settings::read_target_language()));
 
     let mut pending: Option<PendingSeg> = None;
     // Summaries are user-triggered only (regenerate_summary command). No
