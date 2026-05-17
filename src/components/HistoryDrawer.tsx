@@ -36,6 +36,14 @@ export function HistoryDrawer({
     { id: string; title: string; x: number; y: number } | null
   >(null);
   const [hoverTarget, setHoverTarget] = useState<string | null>(null);
+  // `window.confirm` is unreliable inside Tauri's WKWebView (no dialog
+  // plugin), so we show an inline confirmation banner instead.
+  const [pendingMerge, setPendingMerge] = useState<{
+    source: string;
+    sourceTitle: string;
+    target: string;
+    targetTitle: string;
+  } | null>(null);
   const dragInfo = useRef<{
     id: string;
     title: string;
@@ -101,12 +109,12 @@ export function HistoryDrawer({
       const tid = li?.dataset.meetingId;
       if (!tid || tid === info.id) return;
       const tgtRow = rows.find((x) => x.id === tid);
-      const tgtTitle = tgtRow?.title ?? "that meeting";
-      const ok = window.confirm(
-        `Merge "${info.title}" into "${tgtTitle}"?\n\nSegments, chat, notes, and tags from "${info.title}" will be combined into "${tgtTitle}", and "${info.title}" will be deleted. The combined summary will be cleared so you can regenerate it.`,
-      );
-      if (!ok) return;
-      onMerge(info.id, tid);
+      setPendingMerge({
+        source: info.id,
+        sourceTitle: info.title,
+        target: tid,
+        targetTitle: tgtRow?.title ?? "that meeting",
+      });
     };
 
     document.addEventListener("mousemove", onMove);
@@ -169,6 +177,29 @@ export function HistoryDrawer({
         <div className="drawer-hint">
           Grab ⋮⋮ and drop onto another meeting to combine them.
         </div>
+        {pendingMerge && (
+          <div className="merge-confirm">
+            <div className="merge-confirm-text">
+              Merge <strong>{pendingMerge.sourceTitle}</strong> into{" "}
+              <strong>{pendingMerge.targetTitle}</strong>?{" "}
+              <span className="muted">
+                Source will be deleted; summary will be cleared.
+              </span>
+            </div>
+            <div className="merge-confirm-actions">
+              <button
+                className="primary"
+                onClick={() => {
+                  onMerge(pendingMerge.source, pendingMerge.target);
+                  setPendingMerge(null);
+                }}
+              >
+                Merge
+              </button>
+              <button onClick={() => setPendingMerge(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
         {visible.length === 0 && (
           <div className="empty">
             {rows.length === 0 ? "No saved meetings yet." : "No matches."}

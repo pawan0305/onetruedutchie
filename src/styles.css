@@ -405,6 +405,32 @@ button.ghost.danger { color: var(--danger); }
   outline: 2px dashed rgba(120, 170, 255, 0.65);
   outline-offset: -2px;
 }
+.merge-confirm {
+  padding: 10px 12px;
+  background: rgba(120, 170, 255, 0.12);
+  border-bottom: 1px solid rgba(120, 170, 255, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.merge-confirm-text { font-size: 13px; line-height: 1.4; }
+.merge-confirm-actions { display: flex; gap: 8px; }
+.merge-confirm-actions button {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: inherit;
+  cursor: pointer;
+}
+.merge-confirm-actions button.primary {
+  background: rgba(120, 170, 255, 0.65);
+  border-color: rgba(120, 170, 255, 0.65);
+  color: #0a0a0a;
+  font-weight: 500;
+}
+.merge-confirm-actions button:hover { filter: brightness(1.15); }
 .drag-ghost {
   position: fixed;
   z-index: 9999;
