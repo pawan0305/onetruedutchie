@@ -2,7 +2,7 @@
 
 **Real-time meeting transcription, translation, and AI assistant for macOS.**
 
-[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.2.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.2.0/OneTrueDutchie_0.2.0_aarch64.dmg)
+[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.3.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.3.0/OneTrueDutchie_0.3.0_aarch64.dmg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey?style=for-the-badge)](#prerequisites)
 
@@ -27,7 +27,7 @@ language Claude can write. The name stuck.
 
 **Download (Apple Silicon Macs):**
 
-→ **[OneTrueDutchie_0.2.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.2.0/OneTrueDutchie_0.2.0_aarch64.dmg)** (~5.4 MB · macOS 13+ · M1/M2/M3/M4)
+→ **[OneTrueDutchie_0.3.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.3.0/OneTrueDutchie_0.3.0_aarch64.dmg)** (~5.4 MB · macOS 13+ · M1/M2/M3/M4)
 
 Double-click the .dmg to mount it, drag OneTrueDutchie into `/Applications`.
 

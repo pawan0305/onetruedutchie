@@ -110,6 +110,8 @@ pub fn run() {
             commands::rename_meeting,
             commands::merge_meetings,
             commands::export_english_transcript,
+            commands::export_raw_transcript_file,
+            commands::export_cleaned_translated_transcript_file,
             commands::ask_question,
             commands::regenerate_summary,
             commands::set_meeting_title,

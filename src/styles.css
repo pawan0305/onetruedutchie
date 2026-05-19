@@ -173,7 +173,21 @@ button.ghost.danger { color: var(--danger); }
 }
 .pane-header h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--muted); }
 .pane-sub { color: var(--muted); font-size: 12px; }
-.pane-sub-row { display: flex; gap: 10px; align-items: center; }
+.pane-sub-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.download-toast {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(80, 200, 130, 0.12);
+  border: 1px solid rgba(80, 200, 130, 0.4);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.download-toast code {
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+}
 .pane-body { flex: 1; padding: 12px 14px; overflow: auto; }
 .pane-body.scroll { scrollbar-gutter: stable; }
 .empty { color: var(--muted); padding: 16px 0; }

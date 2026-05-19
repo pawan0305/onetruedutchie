@@ -125,6 +125,61 @@ impl Meeting {
         }
         out
     }
+
+    /// Human-readable transcript with [HH:MM:SS] timestamps and speaker
+    /// labels — the format the user wants for download. Use this for
+    /// downloaded files (raw + cleaned/translated), NOT for prompts to
+    /// the LLM (which want `source_text`).
+    pub fn formatted_transcript(&self) -> String {
+        // Auto-hide speaker labels when there's only one speaker — same
+        // logic as the live transcript pane.
+        let mut speakers: std::collections::BTreeSet<u32> = Default::default();
+        for s in &self.segments {
+            if s.is_final {
+                if let Some(sid) = s.speaker_id {
+                    speakers.insert(sid);
+                    if speakers.len() > 1 { break; }
+                }
+            }
+        }
+        let show_speakers = speakers.len() > 1;
+
+        let mut out = String::new();
+        // Header so the file is self-describing.
+        out.push_str(&format!("# {}\n", self.title));
+        out.push_str(&format!(
+            "# Started: {}\n",
+            self.started_at.format("%Y-%m-%d %H:%M:%S %Z"),
+        ));
+        if let Some(end) = self.ended_at {
+            out.push_str(&format!(
+                "# Ended:   {}\n",
+                end.format("%Y-%m-%d %H:%M:%S %Z"),
+            ));
+        }
+        out.push('\n');
+
+        for seg in self.segments.iter().filter(|s| s.is_final) {
+            let line = seg.dutch.trim();
+            if line.is_empty() { continue; }
+            let ts = seg.started_at.format("%H:%M:%S");
+            if show_speakers {
+                let label = seg
+                    .speaker_id
+                    .and_then(|sid| {
+                        self.speaker_names
+                            .get(&sid.to_string())
+                            .cloned()
+                            .or_else(|| Some(format!("Speaker {}", sid + 1)))
+                    })
+                    .unwrap_or_else(|| "Speaker ?".into());
+                out.push_str(&format!("[{ts}] {label}: {line}\n"));
+            } else {
+                out.push_str(&format!("[{ts}] {line}\n"));
+            }
+        }
+        out
+    }
 }
 
 pub struct MeetingHandle {

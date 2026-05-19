@@ -52,6 +52,7 @@ function buildEnglishTranscript(segments: Segment[]): string {
 }
 
 type CopyKind = "nl" | "en";
+type DownloadKind = "raw" | "cleaned";
 
 export function TranscriptPane({
   segments,
@@ -65,8 +66,31 @@ export function TranscriptPane({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const [copied, setCopied] = useState<CopyKind | null>(null);
+  const [downloading, setDownloading] = useState<DownloadKind | null>(null);
+  const [downloadedPath, setDownloadedPath] = useState<string | null>(null);
   const [editingSpeaker, setEditingSpeaker] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+
+  const doDownload = async (kind: DownloadKind) => {
+    if (downloading) return;
+    setDownloading(kind);
+    setDownloadedPath(null);
+    try {
+      const path =
+        kind === "raw"
+          ? await api.exportRawTranscriptFile(meetingId)
+          : await api.exportCleanedTranslatedTranscriptFile(meetingId);
+      // Show "✓ saved to ~/Downloads/…" briefly. Trim the home prefix so
+      // the toast stays readable.
+      const display = path.replace(/^\/Users\/[^/]+/, "~");
+      setDownloadedPath(display);
+      setTimeout(() => setDownloadedPath((p) => (p === display ? null : p)), 6000);
+    } catch (err) {
+      onError?.(`download ${kind}: ${err}`);
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   // Only show speaker labels when the meeting actually has more than one
   // distinct speaker — otherwise it's just noise for solo recordings.
@@ -143,6 +167,22 @@ export function TranscriptPane({
           >
             {copied === "en" ? "✓ copied" : "Copy EN"}
           </button>
+          <button
+            className="ghost"
+            onClick={() => doDownload("raw")}
+            disabled={!hasFinal || downloading !== null}
+            title="Download raw transcript as .txt (timestamps + speakers) to ~/Downloads"
+          >
+            {downloading === "raw" ? "Saving…" : "↓ Raw .txt"}
+          </button>
+          <button
+            className="ghost"
+            onClick={() => doDownload("cleaned")}
+            disabled={!hasFinal || downloading !== null}
+            title="LLM cleans up misheard words / jargon / metaphors, then translates. Saves to ~/Downloads."
+          >
+            {downloading === "cleaned" ? "Cleaning + translating…" : "↓ Cleaned .txt"}
+          </button>
           <span className="pane-sub">{segments.length} segments</span>
           {onCollapse && (
             <button className="ghost" onClick={onCollapse} title="Collapse">
@@ -150,6 +190,11 @@ export function TranscriptPane({
             </button>
           )}
         </div>
+        {downloadedPath && (
+          <div className="download-toast">
+            ✓ saved to <code>{downloadedPath}</code>
+          </div>
+        )}
       </header>
       <div className="pane-body scroll" ref={scrollRef} onScroll={onScroll}>
         {segments.length === 0 && (

@@ -480,6 +480,137 @@ pub async fn export_english_transcript(
     Ok(text)
 }
 
+// --- Transcript downloads -----------------------------------------------
+
+/// Load the requested meeting (live if id matches the current meeting,
+/// otherwise from disk). Returns the full Meeting struct so callers can
+/// build either the raw or the formatted view.
+async fn load_meeting_for_export(
+    id: Option<Uuid>,
+    state: &State<'_, Arc<AppState>>,
+) -> Result<Meeting, String> {
+    if let Some(handle) = state.current() {
+        let live_id = handle.meeting.read().id;
+        if id.map(|i| i == live_id).unwrap_or(true) {
+            return Ok(handle.meeting.read().clone());
+        }
+    }
+    let Some(meeting_id) = id else { return Err("no meeting".into()) };
+    let dir = state.meetings_dir();
+    tokio::task::spawn_blocking(move || storage::load_meeting(&dir, meeting_id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// Replace anything that wouldn't be a friendly filename character with
+/// underscores. Meeting titles can contain slashes, colons, etc. that
+/// either break on disk or wrap awkwardly in Finder.
+fn safe_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\n' | '\r' | '\t' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string()
+}
+
+/// ~/Downloads is the universal "I'm going to grab this later" spot on
+/// macOS and lives outside any app sandbox. Write the file there, return
+/// the absolute path so the UI can show the user exactly where it went.
+fn write_to_downloads(
+    title: &str,
+    suffix: &str,
+    content: &str,
+) -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME unset".to_string())?;
+    let dir = std::path::PathBuf::from(home).join("Downloads");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create downloads dir: {e}"))?;
+    let stem = safe_filename(title);
+    let stem = if stem.is_empty() { "meeting".to_string() } else { stem };
+    let path = dir.join(format!("{stem}-{suffix}.txt"));
+    std::fs::write(&path, content).map_err(|e| format!("write {path:?}: {e}"))?;
+    Ok(path)
+}
+
+/// Download the raw transcript with [HH:MM:SS] timestamps and (when
+/// the meeting had more than one speaker) speaker labels. Pure text,
+/// no LLM call, instant. Returns the absolute path of the written file.
+#[tauri::command]
+pub async fn export_raw_transcript_file(
+    id: Option<Uuid>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let meeting = load_meeting_for_export(id, &state).await?;
+    let text = meeting.formatted_transcript();
+    if text.trim().is_empty() {
+        return Err("transcript is empty".into());
+    }
+    let path = write_to_downloads(&meeting.title, "raw", &text)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Download a cleaned + translated transcript. Sends the formatted
+/// transcript through the configured LLM with a prompt that asks it to
+/// (1) clean up obvious transcription errors and (2) translate to the
+/// target language, all while preserving the [HH:MM:SS] + speaker
+/// structure. Returns the absolute path of the written file.
+#[tauri::command]
+pub async fn export_cleaned_translated_transcript_file(
+    id: Option<Uuid>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String, String> {
+    let an_key = settings::require_llm_credentials().map_err(|e| e.to_string())?;
+    let claude = LlmClient::from_settings(an_key, settings::read_target_language());
+
+    let meeting = load_meeting_for_export(id, &state).await?;
+    let formatted = meeting.formatted_transcript();
+    if formatted.trim().is_empty() {
+        return Err("transcript is empty".into());
+    }
+
+    let target = settings::read_target_language();
+    let prompt = format!(
+        "You are cleaning up and translating a meeting transcript.\n\
+\n\
+Your job, in order:\n\
+1. Fix obvious speech-to-text errors: misheard words, garbled phrases, \
+homophones, mistranscribed technical terms (proper nouns, jargon, \
+project names, acronyms), and mangled metaphors or idioms. Be conservative \
+— only correct things that are clearly mistranscriptions, do not invent \
+content or guess at meaning that isn't there.\n\
+2. Translate the cleaned text into {target}. Keep names, numbers, dates, \
+and acronyms intact. Preserve idiom — render Dutch / source-language \
+idioms as the natural {target} equivalent rather than literally.\n\
+\n\
+PRESERVE THE INPUT STRUCTURE EXACTLY:\n\
+- Keep the header lines starting with '#' (title, started, ended) unchanged.\n\
+- Keep every [HH:MM:SS] timestamp on its own line in the same position.\n\
+- Keep every 'Speaker N:' or named-speaker label exactly as it appears.\n\
+- One line per input line. Do not merge or split lines.\n\
+- No markdown, no preamble, no commentary. Just the cleaned-and-translated \
+transcript.\n\
+\n\
+Transcript:\n\n{formatted}\n",
+        target = target,
+        formatted = formatted,
+    );
+
+    let (text, _usage) = claude
+        .translate_full(&prompt)
+        .await
+        .map_err(|e| e.to_string())?;
+    if text.trim().is_empty() {
+        return Err("LLM returned an empty translation".into());
+    }
+    let path = write_to_downloads(&meeting.title, &format!("cleaned-{}", target.to_lowercase()), &text)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// Rename a historical meeting on disk. The active meeting (if any) is
 /// renamed via `set_meeting_title` instead — that path also updates in-memory
 /// state and emits an event.

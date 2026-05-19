@@ -62,6 +62,16 @@ export const api = {
     invoke<void>("merge_meetings", { source, target }),
   exportEnglishTranscript: (id?: string) =>
     invoke<string>("export_english_transcript", { id }),
+  /** Writes the raw transcript (with [HH:MM:SS] + speaker labels) to
+   *  ~/Downloads/<title>-raw.txt and returns the absolute path. */
+  exportRawTranscriptFile: (id?: string) =>
+    invoke<string>("export_raw_transcript_file", { id }),
+  /** Cleaned (LLM-fixed transcription errors / jargon / metaphors) +
+   *  translated transcript, preserving timestamps + speaker labels.
+   *  Writes to ~/Downloads/<title>-cleaned-<lang>.txt and returns the
+   *  absolute path. Slower (involves an LLM call over the full transcript). */
+  exportCleanedTranslatedTranscriptFile: (id?: string) =>
+    invoke<string>("export_cleaned_translated_transcript_file", { id }),
   regenerateSummary: (id?: string) => invoke<void>("regenerate_summary", { id }),
   askQuestion: (question: string, meetingId?: string) =>
     invoke<{ stream_id: string }>("ask_question", {
