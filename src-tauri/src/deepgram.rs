@@ -20,8 +20,10 @@ pub struct DeepgramConfig {
     pub sample_rate: u32, // 16000
     pub channels: u16,    // 1
     pub interim: bool,
-    /// Speaker diarization on/off — labels words with a speaker id so we
-    /// can distinguish "Speaker 1" from "Speaker 2" in real meetings.
+    /// Speaker diarization on/off. Disabled — acoustic diarization is
+    /// unreliable for single-mic meetings (everything collapses to one
+    /// speaker, or flips spuriously), so it created noise without value.
+    /// Field kept so the URL builder and config stay stable; always false.
     pub diarize: bool,
     /// Custom vocabulary (Nova-3 `keyterm`) — boosts these words/phrases.
     pub keyterms: Vec<String>,
@@ -39,7 +41,7 @@ impl Default for DeepgramConfig {
             sample_rate: 16_000,
             channels: 1,
             interim: true,
-            diarize: true,
+            diarize: false,
             keyterms: vec![],
         }
     }

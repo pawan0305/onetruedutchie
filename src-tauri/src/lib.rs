@@ -98,7 +98,6 @@ pub fn run() {
             commands::save_overlay_geometry,
             commands::set_meeting_notes,
             commands::set_meeting_tags,
-            commands::set_speaker_name,
             commands::start_meeting,
             commands::stop_meeting,
             commands::set_paused,

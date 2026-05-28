@@ -2,7 +2,7 @@
 
 **Real-time meeting transcription, translation, and AI assistant for macOS.**
 
-[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.3.1_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.3.1/OneTrueDutchie_0.3.1_aarch64.dmg)
+[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.4.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.4.0/OneTrueDutchie_0.4.0_aarch64.dmg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey?style=for-the-badge)](#prerequisites)
 
@@ -15,7 +15,7 @@ language Claude can write. The name stuck.
 - **Translate** every chunk into your target language as it happens
 - **Summarise** the whole meeting on demand
 - **Chat with the meeting** — ask Claude questions that use the full transcript as context
-- **Speaker diarization** with editable speaker names
+- **Download transcripts** as .txt — raw (timestamped) or AI-cleaned-and-translated
 - **History** with search, tags, and drag-to-merge (combine recordings that should have been one meeting)
 - **Custom vocabulary** to boost recognition of names, jargon, and acronyms
 - **Audio level VU + cost meter** so you always know it's listening and what you've spent
@@ -27,7 +27,7 @@ language Claude can write. The name stuck.
 
 **Download (Apple Silicon Macs):**
 
-→ **[OneTrueDutchie_0.3.1_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.3.1/OneTrueDutchie_0.3.1_aarch64.dmg)** (~5.4 MB · macOS 13+ · M1/M2/M3/M4)
+→ **[OneTrueDutchie_0.4.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.4.0/OneTrueDutchie_0.4.0_aarch64.dmg)** (~5.4 MB · macOS 13+ · M1/M2/M3/M4)
 
 Double-click the .dmg to mount it, drag OneTrueDutchie into `/Applications`.
 
@@ -116,10 +116,13 @@ and drop it onto another. Segments, chat, notes, and tags from both
 recordings are combined and re-sorted by timestamp — the merged
 transcript reads chronologically.
 
-### Speaker diarization
-Deepgram acoustic diarization labels speakers 0/1/2/… Click the label
-in the transcript to rename them ("Maria", "Sales lead"). Hidden
-automatically for solo meetings where everything is speaker 0.
+### Transcript downloads
+Two buttons in the transcript pane: **↓ Raw .txt** writes the verbatim
+transcript with `[HH:MM:SS]` timestamps to `~/Downloads`, instantly.
+**↓ Cleaned .txt** runs the transcript through your LLM to fix
+mistranscriptions / jargon / mangled metaphors and translate it into
+your target language, preserving the timestamp structure. Long
+transcripts are chunked so nothing truncates.
 
 ### Custom vocabulary
 Settings → Custom vocabulary. One term per line. Boosts these via
@@ -188,7 +191,7 @@ strip so you can give the active one more room.
    16 kHz mono Int16
 2. Rust reads chunks from stdin and broadcasts to one or more consumers
 3. Deepgram WebSocket consumer streams audio to Nova-3 with
-   `language=multi`, `diarize=true`, `keyterm=<your vocab>`
+   `language=multi`, `keyterm=<your vocab>`
 4. Interim text shows up as `segment:pending` events on the overlay and
    transcript pane
 5. On is_final the segment is committed — a background task calls

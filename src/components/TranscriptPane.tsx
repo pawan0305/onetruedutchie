@@ -7,19 +7,8 @@ interface Props {
   pendingId?: string;
   meetingId?: string;
   showEnglish?: boolean;
-  speakerNames?: Record<string, string>;
   onError?: (msg: string) => void;
   onCollapse?: () => void;
-}
-
-function speakerLabel(
-  speaker_id: number | null | undefined,
-  names: Record<string, string> | undefined,
-): string | null {
-  if (speaker_id == null) return null;
-  const key = String(speaker_id);
-  const mapped = names?.[key];
-  return mapped && mapped.trim() ? mapped : `Speaker ${speaker_id + 1}`;
 }
 
 function fmtTime(iso: string): string {
@@ -59,7 +48,6 @@ export function TranscriptPane({
   pendingId,
   meetingId,
   showEnglish = true,
-  speakerNames,
   onError,
   onCollapse,
 }: Props) {
@@ -68,8 +56,6 @@ export function TranscriptPane({
   const [copied, setCopied] = useState<CopyKind | null>(null);
   const [downloading, setDownloading] = useState<DownloadKind | null>(null);
   const [downloadedPath, setDownloadedPath] = useState<string | null>(null);
-  const [editingSpeaker, setEditingSpeaker] = useState<number | null>(null);
-  const [draft, setDraft] = useState("");
 
   const doDownload = async (kind: DownloadKind) => {
     if (downloading) return;
@@ -89,28 +75,6 @@ export function TranscriptPane({
       onError?.(`download ${kind}: ${err}`);
     } finally {
       setDownloading(null);
-    }
-  };
-
-  // Only show speaker labels when the meeting actually has more than one
-  // distinct speaker — otherwise it's just noise for solo recordings.
-  const showSpeakers = (() => {
-    const seen = new Set<number>();
-    for (const s of segments) {
-      if (s.is_final && s.speaker_id != null) {
-        seen.add(s.speaker_id);
-        if (seen.size > 1) return true;
-      }
-    }
-    return false;
-  })();
-
-  const commitSpeakerName = async (sid: number) => {
-    setEditingSpeaker(null);
-    try {
-      await api.setSpeakerName(meetingId, sid, draft.trim());
-    } catch (err) {
-      onError?.(`speaker: ${err}`);
     }
   };
 
@@ -212,41 +176,6 @@ export function TranscriptPane({
             <div className="segment-time">{fmtTime(s.started_at)}</div>
             <div className={`segment-cols${showEnglish ? "" : " single"}`}>
               <div className="col nl">
-                {(() => {
-                  if (!showSpeakers) return null;
-                  const sid = s.speaker_id ?? null;
-                  const label = speakerLabel(sid, speakerNames);
-                  if (label == null) return null;
-                  if (editingSpeaker === sid) {
-                    return (
-                      <input
-                        className="segment-speaker-input"
-                        autoFocus
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        onBlur={() => sid != null && commitSpeakerName(sid)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                          if (e.key === "Escape") setEditingSpeaker(null);
-                        }}
-                      />
-                    );
-                  }
-                  return (
-                    <div
-                      className="segment-speaker"
-                      title="Click to rename this speaker"
-                      onClick={() => {
-                        if (sid == null) return;
-                        setDraft(speakerNames?.[String(sid)] ?? "");
-                        setEditingSpeaker(sid);
-                      }}
-                    >
-                      {label}
-                    </div>
-                  );
-                })()}
                 {showEnglish && <div className="lang-label">NL</div>}
                 <div className="text">{s.dutch || <em>…</em>}</div>
               </div>

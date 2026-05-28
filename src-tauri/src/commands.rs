@@ -203,51 +203,6 @@ pub async fn set_meeting_tags(
     .map(|m| state_clone.emit("meeting:update", m))
 }
 
-/// Label a diarized speaker ("0", "1", …) with a human name.
-#[tauri::command]
-pub async fn set_speaker_name(
-    id: Option<Uuid>,
-    speaker_id: u32,
-    name: String,
-    state: State<'_, Arc<AppState>>,
-) -> Result<(), String> {
-    let key = speaker_id.to_string();
-    let name = name.trim().to_string();
-    if let Some(handle) = state.current() {
-        let live_id = handle.meeting.read().id;
-        if id.map(|i| i == live_id).unwrap_or(true) {
-            {
-                let mut m = handle.meeting.write();
-                if name.is_empty() {
-                    m.speaker_names.remove(&key);
-                } else {
-                    m.speaker_names.insert(key, name);
-                }
-            }
-            let snap = handle.meeting.read().clone();
-            state.emit("meeting:update", snap);
-            return Ok(());
-        }
-    }
-    let Some(meeting_id) = id else { return Err("no meeting".into()) };
-    let dir = state.meetings_dir();
-    let state_clone = state.inner().clone();
-    tokio::task::spawn_blocking(move || -> anyhow::Result<crate::state::Meeting> {
-        let mut m = storage::load_meeting(&dir, meeting_id)?;
-        if name.is_empty() {
-            m.speaker_names.remove(&key);
-        } else {
-            m.speaker_names.insert(key, name);
-        }
-        storage::save_meeting(&dir, &m)?;
-        Ok(m)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
-    .map(|m| state_clone.emit("meeting:update", m))
-}
-
 /// Adjust the subtitle font size in pixels.
 #[tauri::command]
 pub async fn set_overlay_font_size(

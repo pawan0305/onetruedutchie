@@ -43,8 +43,6 @@ export const api = {
     invoke<void>("set_meeting_notes", { id, notes }),
   setMeetingTags: (id: string | undefined, tags: string[]) =>
     invoke<void>("set_meeting_tags", { id, tags }),
-  setSpeakerName: (id: string | undefined, speakerId: number, name: string) =>
-    invoke<void>("set_speaker_name", { id, speakerId, name }),
   startMeeting: (title?: string) =>
     invoke<Meeting>("start_meeting", { title }),
   stopMeeting: () => invoke<Meeting>("stop_meeting"),

@@ -356,7 +356,6 @@ export function App() {
                 pendingId={pending?.id}
                 meetingId={meeting?.id}
                 showEnglish={settings?.translate ?? true}
-                speakerNames={meeting?.speaker_names}
                 onError={pushError}
                 onCollapse={() => setTranscriptCollapsed(true)}
               />

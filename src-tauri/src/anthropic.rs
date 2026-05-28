@@ -445,7 +445,7 @@ pub fn clean_translate_system(target: &str) -> String {
         "You clean up and translate meeting transcripts.\n\
 \n\
 The input is a speech-to-text transcript. Each line is one utterance, prefixed with a \
-[HH:MM:SS] timestamp and sometimes a \"Speaker N:\" (or named) label.\n\
+[HH:MM:SS] timestamp.\n\
 \n\
 Do two things, in order:\n\
 1. Fix obvious speech-to-text errors: misheard words, homophones, garbled phrases, \
@@ -458,7 +458,6 @@ Render idioms as the natural {t} equivalent, not word-for-word.\n\
 Output rules — follow exactly:\n\
 - Keep every [HH:MM:SS] timestamp, in its original position, on the same line as its \
 utterance.\n\
-- Keep every \"Speaker N:\" / named-speaker label exactly as it appears.\n\
 - Exactly one output line per input line. Never merge or split lines. Never reorder.\n\
 - If a line is already in {t}, just clean it; don't re-translate.\n\
 - No markdown, no code fences, no preamble, no commentary, no trailing notes. Output ONLY \
