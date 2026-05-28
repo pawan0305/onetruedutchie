@@ -57,6 +57,13 @@ impl LlmClient {
         }
     }
 
+    pub async fn clean_and_translate(&self, formatted_chunk: &str) -> Result<(String, Usage)> {
+        match self {
+            LlmClient::Anthropic(c) => c.clean_and_translate(formatted_chunk).await,
+            LlmClient::OpenAI(c) => c.clean_and_translate(formatted_chunk).await,
+        }
+    }
+
     pub async fn chat_stream(
         &self,
         transcript: &str,

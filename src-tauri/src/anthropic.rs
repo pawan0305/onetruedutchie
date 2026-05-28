@@ -205,6 +205,47 @@ impl AnthropicClient {
         Ok((extract_text(&resp), resp.usage))
     }
 
+    /// Clean up a (formatted, timestamped, speaker-labelled) transcript and
+    /// translate it to the target language in one pass, preserving the line
+    /// structure. The caller is responsible for chunking long transcripts so
+    /// the output doesn't hit the token cap.
+    pub async fn clean_and_translate(&self, formatted_chunk: &str) -> Result<(String, Usage)> {
+        if formatted_chunk.trim().is_empty() {
+            return Ok((String::new(), Usage::default()));
+        }
+        let system_text = clean_translate_system(&self.target_language);
+        let system = vec![SystemBlock::Text {
+            text: &system_text,
+            cache_control: Some(CacheControl { typ: "ephemeral" }),
+        }];
+        // The chunk IS the user message — no extra framing, so nothing
+        // competes with the structure-preservation instructions.
+        let messages = vec![MessageItem {
+            role: "user",
+            content: vec![ContentBlock::Text { text: formatted_chunk, cache_control: None }],
+        }];
+        let req = MessageReq {
+            model: &self.model,
+            max_tokens: 8000,
+            system: Some(system),
+            messages,
+            temperature: Some(0.2),
+            stream: None,
+        };
+        let resp: MessageResp = self
+            .auth(self.http.post(ANTHROPIC_URL))
+            .json(&req)
+            .send()
+            .await
+            .context("clean_and_translate: send")?
+            .error_for_status()
+            .context("clean_and_translate: status")?
+            .json()
+            .await
+            .context("clean_and_translate: decode")?;
+        Ok((extract_text(&resp), resp.usage))
+    }
+
     /// Generate a running summary of the transcript so far.
     pub async fn summarize(&self, transcript: &str) -> Result<(String, Usage)> {
         if transcript.trim().is_empty() {
@@ -395,6 +436,33 @@ as-is rather than inventing content.\n\
 - Preserve all content — every statement, name, number, date, acronym. Do not summarize, do \
 not omit, do not add.\n\
 - Plain text only — no markdown, no bullets, no headings. Use natural paragraph breaks.",
+        t = target,
+    )
+}
+
+pub fn clean_translate_system(target: &str) -> String {
+    format!(
+        "You clean up and translate meeting transcripts.\n\
+\n\
+The input is a speech-to-text transcript. Each line is one utterance, prefixed with a \
+[HH:MM:SS] timestamp and sometimes a \"Speaker N:\" (or named) label.\n\
+\n\
+Do two things, in order:\n\
+1. Fix obvious speech-to-text errors: misheard words, homophones, garbled phrases, \
+mistranscribed technical terms / proper nouns / jargon / acronyms, and mangled idioms or \
+metaphors. Be conservative — only correct clear mistranscriptions; never invent content or \
+add meaning that isn't there.\n\
+2. Translate the cleaned text into {t}. Keep names, numbers, dates, and acronyms intact. \
+Render idioms as the natural {t} equivalent, not word-for-word.\n\
+\n\
+Output rules — follow exactly:\n\
+- Keep every [HH:MM:SS] timestamp, in its original position, on the same line as its \
+utterance.\n\
+- Keep every \"Speaker N:\" / named-speaker label exactly as it appears.\n\
+- Exactly one output line per input line. Never merge or split lines. Never reorder.\n\
+- If a line is already in {t}, just clean it; don't re-translate.\n\
+- No markdown, no code fences, no preamble, no commentary, no trailing notes. Output ONLY \
+the cleaned-and-translated transcript lines.",
         t = target,
     )
 }

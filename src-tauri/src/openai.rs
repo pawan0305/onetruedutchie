@@ -208,6 +208,16 @@ impl OpenAIClient {
         self.single(&system, &user, Some(4000), Some(0.3)).await
     }
 
+    /// Clean up + translate a formatted transcript chunk, preserving the
+    /// timestamp + speaker line structure. Mirrors AnthropicClient's method.
+    pub async fn clean_and_translate(&self, formatted_chunk: &str) -> Result<(String, Usage)> {
+        if formatted_chunk.trim().is_empty() {
+            return Ok((String::new(), Usage::default()));
+        }
+        let system = crate::anthropic::clean_translate_system(&self.target_language);
+        self.single(&system, formatted_chunk, Some(8000), Some(0.2)).await
+    }
+
     /// Stream a chat answer. Same shape as AnthropicClient::chat_stream so
     /// the orchestrator doesn't have to care which backend it's talking to.
     pub async fn chat_stream(

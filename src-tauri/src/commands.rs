@@ -566,6 +566,7 @@ pub async fn export_cleaned_translated_transcript_file(
 ) -> Result<String, String> {
     let an_key = settings::require_llm_credentials().map_err(|e| e.to_string())?;
     let claude = LlmClient::from_settings(an_key, settings::read_target_language());
+    let target = settings::read_target_language();
 
     let meeting = load_meeting_for_export(id, &state).await?;
     let formatted = meeting.formatted_transcript();
@@ -573,41 +574,60 @@ pub async fn export_cleaned_translated_transcript_file(
         return Err("transcript is empty".into());
     }
 
-    let target = settings::read_target_language();
-    let prompt = format!(
-        "You are cleaning up and translating a meeting transcript.\n\
-\n\
-Your job, in order:\n\
-1. Fix obvious speech-to-text errors: misheard words, garbled phrases, \
-homophones, mistranscribed technical terms (proper nouns, jargon, \
-project names, acronyms), and mangled metaphors or idioms. Be conservative \
-— only correct things that are clearly mistranscriptions, do not invent \
-content or guess at meaning that isn't there.\n\
-2. Translate the cleaned text into {target}. Keep names, numbers, dates, \
-and acronyms intact. Preserve idiom — render Dutch / source-language \
-idioms as the natural {target} equivalent rather than literally.\n\
-\n\
-PRESERVE THE INPUT STRUCTURE EXACTLY:\n\
-- Keep the header lines starting with '#' (title, started, ended) unchanged.\n\
-- Keep every [HH:MM:SS] timestamp on its own line in the same position.\n\
-- Keep every 'Speaker N:' or named-speaker label exactly as it appears.\n\
-- One line per input line. Do not merge or split lines.\n\
-- No markdown, no preamble, no commentary. Just the cleaned-and-translated \
-transcript.\n\
-\n\
-Transcript:\n\n{formatted}\n",
-        target = target,
-        formatted = formatted,
-    );
+    // Split off the leading "# …" header lines (title / started / ended).
+    // They're metadata, not speech — keep them verbatim, don't translate.
+    let mut header_lines: Vec<&str> = Vec::new();
+    let mut body_lines: Vec<&str> = Vec::new();
+    let mut in_header = true;
+    for line in formatted.lines() {
+        if in_header && (line.starts_with('#') || line.trim().is_empty()) {
+            header_lines.push(line);
+        } else {
+            in_header = false;
+            body_lines.push(line);
+        }
+    }
 
-    let (text, _usage) = claude
-        .translate_full(&prompt)
-        .await
-        .map_err(|e| e.to_string())?;
-    if text.trim().is_empty() {
+    // Chunk the body so we never blow the per-response token cap on long
+    // meetings (a 1000+ segment news broadcast would truncate badly in a
+    // single call). ~120 lines per chunk keeps each request comfortably
+    // under the 8000-token output limit while preserving enough local
+    // context for good cleanup.
+    const CHUNK_LINES: usize = 120;
+    let mut cleaned_parts: Vec<String> = Vec::new();
+    for chunk in body_lines.chunks(CHUNK_LINES) {
+        let chunk_text = chunk.join("\n");
+        if chunk_text.trim().is_empty() {
+            continue;
+        }
+        let (text, _usage) = claude
+            .clean_and_translate(&chunk_text)
+            .await
+            .map_err(|e| e.to_string())?;
+        let text = text.trim_matches('\n').to_string();
+        if !text.is_empty() {
+            cleaned_parts.push(text);
+        }
+    }
+
+    if cleaned_parts.is_empty() {
         return Err("LLM returned an empty translation".into());
     }
-    let path = write_to_downloads(&meeting.title, &format!("cleaned-{}", target.to_lowercase()), &text)?;
+
+    // Reassemble: original header (verbatim) + cleaned body chunks.
+    let header = header_lines.join("\n");
+    let body = cleaned_parts.join("\n");
+    let out = if header.trim().is_empty() {
+        body
+    } else {
+        format!("{}\n{}\n", header.trim_end(), body)
+    };
+
+    let path = write_to_downloads(
+        &meeting.title,
+        &format!("cleaned-{}", target.to_lowercase().replace(' ', "-")),
+        &out,
+    )?;
     Ok(path.to_string_lossy().to_string())
 }
 
