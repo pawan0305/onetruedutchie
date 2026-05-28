@@ -25,6 +25,8 @@ export const api = {
     invoke<SettingsView>("set_vocab", { words }),
   setTargetLanguage: (language: string) =>
     invoke<SettingsView>("set_target_language", { language }),
+  setSourceLanguage: (code: string) =>
+    invoke<SettingsView>("set_source_language", { code }),
   setLlmProvider: (provider: "anthropic" | "openai") =>
     invoke<SettingsView>("set_llm_provider", { provider }),
   setOpenAIConfig: (cfg: {

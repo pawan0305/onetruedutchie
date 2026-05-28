@@ -45,6 +45,7 @@ export interface SettingsView {
   overlay_locked: boolean;
   keywords: string[];
   target_language: string;
+  source_language: string; // Deepgram code: "multi" | "nl" | "nl-BE" | "en" | …
   llm_provider: string; // "anthropic" | "openai"
   openai_set: boolean;
   openai_base_url: string;

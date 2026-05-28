@@ -112,6 +112,16 @@ pub async fn set_openai_config(
     settings::settings_view().map_err(|e| e.to_string())
 }
 
+/// Set the Deepgram source-language code ("multi" = auto-detect, "nl" =
+/// Dutch, "nl-BE" = Flemish, "en", "de", …). Locking to a single language
+/// is more accurate than multi when you know what's being spoken. Applies
+/// when the next meeting's Deepgram connection opens.
+#[tauri::command]
+pub async fn set_source_language(code: String) -> Result<SettingsView, String> {
+    settings::set_source_language(&code).map_err(|e| e.to_string())?;
+    settings::settings_view().map_err(|e| e.to_string())
+}
+
 /// Set the target language Claude uses for translation, summary, and chat.
 /// Source language is auto-detected by Deepgram. Takes effect on the next
 /// translation / summary / chat call (no restart needed).
@@ -984,6 +994,7 @@ async fn run_meeting(
     {
         let cfg_template = DeepgramConfig {
             api_key: dg_key,
+            language: settings::read_source_language(),
             keyterms: settings::read_keywords(),
             ..Default::default()
         };

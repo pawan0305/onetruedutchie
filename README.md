@@ -2,7 +2,7 @@
 
 **Real-time meeting transcription, translation, and AI assistant for macOS.**
 
-[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.4.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.4.0/OneTrueDutchie_0.4.0_aarch64.dmg)
+[![Download .dmg](https://img.shields.io/badge/Download-OneTrueDutchie_v0.5.0_aarch64.dmg-0a84ff?style=for-the-badge&logo=apple)](https://github.com/pawan0305/onetruedutchie/releases/download/v0.5.0/OneTrueDutchie_0.5.0_aarch64.dmg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-lightgrey?style=for-the-badge)](#prerequisites)
 
@@ -27,7 +27,7 @@ language Claude can write. The name stuck.
 
 **Download (Apple Silicon Macs):**
 
-→ **[OneTrueDutchie_0.4.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.4.0/OneTrueDutchie_0.4.0_aarch64.dmg)** (~5.4 MB · macOS 13+ · M1/M2/M3/M4)
+→ **[OneTrueDutchie_0.5.0_aarch64.dmg](https://github.com/pawan0305/onetruedutchie/releases/download/v0.5.0/OneTrueDutchie_0.5.0_aarch64.dmg)** (~5.4 MB · macOS 13+ · M1/M2/M3/M4)
 
 Double-click the .dmg to mount it, drag OneTrueDutchie into `/Applications`.
 
@@ -104,10 +104,12 @@ target only`), font size, lock, and hide buttons — no alt-tab to the
 main window mid-meeting.
 
 ### Multi-language
-Source language is auto-detected per utterance via Deepgram
-`language=multi` on Nova-3. Target language for translation, summary,
-and chat is set in Settings — pick from 20 common options or type any
-language Claude knows. Default English.
+Source language defaults to auto-detect (`language=multi` on Nova-3),
+but Settings → **Source language** lets you lock to a single language
+(Dutch, Flemish, English, German, …) which is noticeably more accurate
+than auto-detect when you know what's being spoken. Target language for
+translation, summary, and chat is set separately — pick from 20 common
+options or type any language Claude knows. Default English.
 
 ### Drag-to-merge history
 If you stopped a recording and started a new one in the middle of the

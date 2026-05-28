@@ -28,6 +28,24 @@ const LANG_OPTIONS = [
   "Thai",
 ];
 
+// Source language = the Deepgram `language` param. "multi" auto-detects
+// across Nova-3's multilingual set; a specific code locks to one language
+// (more accurate when you know what's being spoken). Label → code.
+const SOURCE_LANG_OPTIONS: { label: string; code: string }[] = [
+  { label: "Auto-detect (multilingual)", code: "multi" },
+  { label: "Dutch", code: "nl" },
+  { label: "Flemish (Belgian Dutch)", code: "nl-BE" },
+  { label: "English", code: "en" },
+  { label: "German", code: "de" },
+  { label: "French", code: "fr" },
+  { label: "Spanish", code: "es" },
+  { label: "Italian", code: "it" },
+  { label: "Portuguese", code: "pt" },
+  { label: "Russian", code: "ru" },
+  { label: "Hindi", code: "hi" },
+  { label: "Japanese", code: "ja" },
+];
+
 interface Props {
   settings: SettingsView | null;
   onSave: (deepgram: string, anthropic: string) => Promise<void> | void;
@@ -51,6 +69,20 @@ export function SettingsModal({ settings, onSave, onSettingsChanged, onClose, on
     settings?.target_language || "English",
   );
   const [savingLang, setSavingLang] = useState(false);
+  // Source language (Deepgram code). "multi" = auto-detect.
+  const [sourceLang, setSourceLang] = useState<string>(
+    settings?.source_language || "multi",
+  );
+
+  const saveSourceLang = async (code: string) => {
+    setSourceLang(code);
+    try {
+      const s = await api.setSourceLanguage(code);
+      onSettingsChanged(s);
+    } catch (err) {
+      onError(`source language: ${err}`);
+    }
+  };
 
   // LLM backend. "anthropic" or "openai" (= any OpenAI-compatible endpoint
   // — OpenAI itself, Ollama, LM Studio, vLLM, OpenRouter, etc.).
@@ -261,6 +293,27 @@ export function SettingsModal({ settings, onSave, onSettingsChanged, onClose, on
             </div>
           </label>
         )}
+
+        <label>
+          <span>
+            Source language
+            <em className="muted"> (what's being spoken)</em>
+          </span>
+          <select
+            value={sourceLang}
+            onChange={(e) => saveSourceLang(e.target.value)}
+          >
+            {SOURCE_LANG_OPTIONS.map((o) => (
+              <option key={o.code} value={o.code}>{o.label}</option>
+            ))}
+          </select>
+          <small>
+            Locking to one language (e.g. Dutch) is noticeably more
+            accurate than auto-detect when you know what's being spoken.
+            Use auto-detect for mixed-language calls. Takes effect on the
+            next meeting.
+          </small>
+        </label>
 
         <label>
           <span>

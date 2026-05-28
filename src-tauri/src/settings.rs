@@ -42,6 +42,13 @@ pub struct ApiKeys {
     /// straight into the prompts. Default "English".
     #[serde(default = "default_target_language")]
     pub target_language: String,
+    /// Deepgram source-language code. "multi" (default) = auto-detect across
+    /// Nova-3's multilingual set. A specific code like "nl" (Dutch), "nl-BE"
+    /// (Flemish), "en", "de" locks Nova-3 to that single language, which is
+    /// markedly more accurate than multi when you know what's being spoken.
+    /// Applied when the Deepgram connection opens, i.e. on the next meeting.
+    #[serde(default = "default_source_language")]
+    pub source_language: String,
     /// Which LLM backend to use for translation / summary / chat.
     /// "anthropic" (default) uses api.anthropic.com with the configured
     /// anthropic key. "openai" uses any OpenAI-compatible endpoint —
@@ -78,6 +85,7 @@ impl Default for ApiKeys {
             overlay_w: None,
             overlay_h: None,
             target_language: default_target_language(),
+            source_language: default_source_language(),
             llm_provider: default_llm_provider(),
             openai_api_key: None,
             openai_base_url: String::new(),
@@ -91,6 +99,7 @@ fn default_overlay() -> String { "off".to_string() }
 fn default_overlay_size() -> u32 { 24 }
 fn default_overlay_locked() -> bool { true }
 fn default_target_language() -> String { "English".to_string() }
+fn default_source_language() -> String { "multi".to_string() }
 fn default_llm_provider() -> String { "anthropic".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +112,7 @@ pub struct SettingsView {
     pub overlay_locked: bool,
     pub keywords: Vec<String>,
     pub target_language: String,
+    pub source_language: String,
     pub llm_provider: String,
     pub openai_set: bool,
     pub openai_base_url: String,
@@ -137,6 +147,7 @@ pub fn settings_view() -> Result<SettingsView> {
         overlay_locked: keys.overlay_locked,
         keywords: keys.keywords.clone(),
         target_language: keys.target_language.clone(),
+        source_language: keys.source_language.clone(),
         llm_provider: keys.llm_provider.clone(),
         openai_set: keys
             .openai_api_key
@@ -210,6 +221,23 @@ pub fn set_target_language(lang: &str) -> Result<()> {
     let trimmed = lang.trim();
     keys.target_language = if trimmed.is_empty() {
         "English".into()
+    } else {
+        trimmed.to_string()
+    };
+    write_keys_back(&keys)
+}
+
+pub fn read_source_language() -> String {
+    read_keys()
+        .map(|k| k.source_language)
+        .unwrap_or_else(|_| "multi".into())
+}
+
+pub fn set_source_language(code: &str) -> Result<()> {
+    let mut keys = read_keys().unwrap_or_default();
+    let trimmed = code.trim();
+    keys.source_language = if trimmed.is_empty() {
+        "multi".into()
     } else {
         trimmed.to_string()
     };

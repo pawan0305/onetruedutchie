@@ -93,6 +93,7 @@ pub fn run() {
             commands::set_overlay_locked,
             commands::set_vocab,
             commands::set_target_language,
+            commands::set_source_language,
             commands::set_llm_provider,
             commands::set_openai_config,
             commands::save_overlay_geometry,
